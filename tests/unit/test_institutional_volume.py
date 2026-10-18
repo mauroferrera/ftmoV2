@@ -1,0 +1,152 @@
+"""Tests unitarios puros para core.institutional_volume."""
+
+import pytest
+from core.institutional_volume import (
+    analyze_futures_volume,
+    calculate_volume_sma,
+    classify_volume_activity,
+    detect_absorption,
+    detect_smt_divergence,
+    evaluate_institutional_confluence,
+)
+
+
+def test_calculate_volume_sma():
+    assert calculate_volume_sma([]) == []
+    vols = [100.0, 200.0, 300.0]
+    smas = calculate_volume_sma(vols, lookback=2)
+    assert smas[0] == 100.0
+    assert smas[1] == 150.0
+    assert smas[2] == 250.0
+
+
+def test_classify_volume_activity():
+    tag, ratio, is_whale = classify_volume_activity(2500, 1000)
+    assert tag == "PICO INSTITUCIONAL (BALLENAS)"
+    assert ratio == 2.5
+    assert is_whale is True
+
+    tag, ratio, is_whale = classify_volume_activity(500, 1000)
+    assert tag == "BAJO / SIN INTERÉS"
+    assert ratio == 0.5
+    assert is_whale is False
+
+    tag, ratio, is_whale = classify_volume_activity(1100, 1000)
+    assert tag == "NORMAL"
+    assert is_whale is False
+
+
+def test_detect_absorption_bullish():
+    # Vela con rango 1.1100 a 1.1200 (100 pips).
+    # Open 1.1160, Close 1.1180, Low 1.1100 -> lower_wick = 1.1160 - 1.1100 = 60 pips (60% del rango)
+    candle = {
+        "open": 1.1160,
+        "high": 1.1200,
+        "low": 1.1100,
+        "close": 1.1180,
+        "volume": 3000,
+    }
+    result = detect_absorption(candle, avg_volume=1500)
+    assert result == "ABSORCION_COMPRADORA"
+
+
+def test_detect_absorption_bearish():
+    # Open 1.1140, Close 1.1120, High 1.1200 -> upper_wick = 1.1200 - 1.1140 = 60 pips (60% del rango)
+    candle = {
+        "open": 1.1140,
+        "high": 1.1200,
+        "low": 1.1100,
+        "close": 1.1120,
+        "volume": 2500,
+    }
+    result = detect_absorption(candle, avg_volume=1200)
+    assert result == "ABSORCION_VENDEDORA"
+
+
+def test_detect_absorption_none_when_low_volume():
+    candle = {
+        "open": 1.1160,
+        "high": 1.1200,
+        "low": 1.1100,
+        "close": 1.1180,
+        "volume": 1000,  # Below 1.4x of 1500
+    }
+    assert detect_absorption(candle, avg_volume=1500) is None
+
+
+def test_analyze_futures_volume():
+    candles = [
+        {"time": f"2026-10-31 10:{i:02d}", "open": 1.11, "high": 1.12, "low": 1.10, "close": 1.115, "volume": 1000}
+        for i in range(10)
+    ]
+    # Add a whale candle at the end
+    candles.append({
+        "time": "2026-10-31 10:15",
+        "open": 1.116,
+        "high": 1.120,
+        "low": 1.110,
+        "close": 1.118,
+        "volume": 2500,
+    })
+    res = analyze_futures_volume(candles, lookback=10)
+    assert res["available"] is True
+    assert res["last_volume"] == 2500.0
+    assert res["avg_volume"] == 1000.0
+    assert res["vol_ratio"] == 2.5
+    assert res["whale_detected"] is True
+    assert res["absorption"] == "ABSORCION_COMPRADORA"
+
+
+def test_detect_smt_divergence_bullish():
+    # Asset defended Lows while Benchmark broke Highs
+    asset = [
+        {"high": 1.1200, "low": 1.1150},
+        {"high": 1.1210, "low": 1.1160},
+        {"high": 1.1205, "low": 1.1155},  # Low 1.1155 > 1.1150 (Did not break prior low)
+    ]
+    bm = [
+        {"high": 101.50, "low": 101.00},
+        {"high": 101.60, "low": 101.10},
+        {"high": 101.80, "low": 101.20},  # High 101.80 > 101.60 (Broke prior high)
+    ]
+    res = detect_smt_divergence(asset, bm, lookback_bars=3)
+    assert res["status"] == "BULLISH_SMT"
+    assert res["bias"] == "BUY"
+
+
+def test_detect_smt_divergence_direct_correlation():
+    # Asset (e.g. USDCAD) with direct correlation to benchmark DXY (inverse=False)
+    # Benchmark made HH, but Asset failed to make HH -> BEARISH_SMT (selling USD)
+    asset = [
+        {"high": 1.3800, "low": 1.3750},
+        {"high": 1.3820, "low": 1.3760},
+        {"high": 1.3810, "low": 1.3755},  # Did not break prior high 1.3820
+    ]
+    bm = [
+        {"high": 104.00, "low": 103.50},
+        {"high": 104.20, "low": 103.60},
+        {"high": 104.50, "low": 103.70},  # Broke prior high
+    ]
+    res = detect_smt_divergence(asset, bm, lookback_bars=3, inverse=False)
+    assert res["status"] == "BEARISH_SMT"
+    assert res["bias"] == "SELL"
+
+
+def test_evaluate_institutional_confluence_inverted_future():
+    # Inverted future (e.g. 6J1! buying Yen means USDJPY is SELL)
+    futures = {
+        "available": True,
+        "whale_detected": True,
+        "vol_ratio": 2.2,
+        "absorption": "ABSORCION_COMPRADORA",
+    }
+    # For inverted future, ABSORCION_COMPRADORA aligns with SELL
+    res_sell = evaluate_institutional_confluence("SELL", futures, inverted_future=True)
+    assert res_sell["status"] == "ALTA_CONFLUENCIA_BALLENAS"
+    assert res_sell["aligned"] is True
+
+    # For inverted future, ABSORCION_COMPRADORA opposes BUY
+    res_buy = evaluate_institutional_confluence("BUY", futures, inverted_future=True)
+    assert res_buy["status"] == "ALERTA_CONTRA_BALLENAS"
+    assert res_buy["aligned"] is False
+

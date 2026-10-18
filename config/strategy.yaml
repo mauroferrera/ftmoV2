@@ -1,0 +1,160 @@
+# Configuración de la estrategia del copiloto FTMO.
+#
+# Una sola fuente de verdad. La lee `settings/strategy_source.py` (I/O) y la
+# consume `core/strategy.py` (lógica pura, valida y aplana). El resto del código
+# NUNCA lee este fichero directamente.
+#
+# Alcance congelado: solo SMC + killzone. Ver `docs/ALCANCE.md`.
+
+risk:
+  # % del CAPITAL FIJO del perfil (no del balance vivo): FTMO se mide contra el
+  # capital inicial. En 2-Step $25k, 0.5% = $125 por operación.
+  risk_pct: 0.5
+  # Riesgo reducido cuando el score está por debajo del umbral pero aún así se
+  # permite entrar (escalón intermedio, no un "todo o nada").
+  reduced_risk_pct: 0.25
+  # Máximo de operaciones por día de trading (la misma ventana que cuenta el
+  # bloqueo de riesgo; dos ventanas distintas desactivan el tope).
+  max_trades_day: 3
+
+execution:
+  # Magic con que salen las órdenes de ESTE copiloto. Todo lo que no lleve este
+  # magic no es de este sistema y no se audita como suyo.
+  magic: 8882026
+  comment: "FTMO Copilot"
+  # Distancia del SL en UNIDADES DE PRECIO (no pips): 12 pips en EURUSD son
+  # 0.0012; en USDJPY, 12 pips son 0.12; en oro, 12 PUNTOS son 0.12 y 12 pips
+  # serían 1.2. `sl_distance_by_symbol` manda sobre el global: cualquier
+  # símbolo que entre en `symbols` NECESITA su entrada o el stop no tiene
+  # sentido para esa volatilidad. Los valores de abajo son un punto de partida
+  # (12-15 pips por símbolo); cámbialos a tu gusto por sesión.
+  sl_distance: 0.0012
+  sl_distance_by_symbol:
+    EURUSD: 0.0012
+    GBPUSD: 0.0015
+    USDCAD: 0.0012
+    USDCHF: 0.0012
+    USDJPY: 0.12
+    EURJPY: 0.15
+    AUDUSD: 0.0012
+    AUDCAD: 0.0012
+    AUDNZD: 0.0015
+    AUDCHF: 0.0012
+    AUDJPY: 0.15
+    XAUUSD: 8.0
+  # Objetivo en múltiplos de R. 2.0 = por cada $1 arriesgado, $2 de objetivo.
+  tp_ratio_r: 2.0
+  deviation_points: 15
+  # --- Gestión parcial escalada (salida en dos tramos) ---
+  # Tramo 1: asegurar caja cerrando el 50% al alcanzar 1:1R y blindando en Break-Even.
+  # Tramo 2: el 50% restante corre con Riesgo Cero hacia 2.0R (o 5.0R).
+  partial_volume_pct: 50.0
+  partial_ratio_r: 1.0
+  runner_ratio_r: 2.0
+  # Al aplicar la gestión, coloca TP del tramo restante en `runner_ratio_r`.
+  set_runner_tp: true
+  # Offset del break-even en UNIDADES DE PRECIO (como sl_distance): se suma al
+  # precio de entrada para que el spread flotante no dispare el BE en cero.
+  # En oro, 0.30 = 30 puntos; en EURUSD, 0.00005 = medio pip.
+  breakeven_offset: 0.00005
+  breakeven_offset_by_symbol:
+    XAUUSD: 0.30
+    EURUSD: 0.00005
+    # Pares JPY (3 dígitos): 0.005 = medio pip. El global 0.00005 son 0.005
+    # pips en estos símbolos, un BE pegado a la entrada.
+    USDJPY: 0.005
+    EURJPY: 0.005
+    AUDJPY: 0.005
+  # Lista blanca de símbolos operables desde el dashboard: los 12 que analiza
+  # la estrategia (ver `symbols` abajo). Vacía = todo permitido (se avisa en
+  # los logs; no es el modo recomendado).
+  symbols_allow:
+    - AUDCAD
+    - AUDCHF
+    - AUDJPY
+    - AUDNZD
+    - AUDUSD
+    - EURJPY
+    - EURUSD
+    - GBPUSD
+    - USDCAD
+    - USDCHF
+    - USDJPY
+    - XAUUSD
+
+score:
+  # Umbral mínimo para que un setup salga "aprobado".
+  min_score: 59.5
+  # R:R mínimo exigido por `validate_entry`.
+  min_rr: 2.0
+  # Vida útil de un setup: pasado este tiempo, el veredicto caduca.
+  setup_ttl_minutes: 40.0
+  # SOLO dos componentes con datos reales (D-002). Un peso > 0 sin feed es
+  # puntuación reservada que nunca se devuelve y aplana el score hacia 0.
+  weights:
+    smc: 85.0
+    killzone: 15.0
+
+# Ventanas en UTC. Las killzones NO se mueven al horario del broker: el score
+# razona en UTC, que es lo que ve el gráfico y lo que lee el agente.
+killzones:
+  - name: Londres
+    start: 07:00
+    end: '10:00'
+  - name: Nueva York
+    start: '12:30'
+    end: '15:30'
+
+clock:
+  # Zona horaria del SERVIDOR DEL BROKER. Define el "día de trading": la
+  # medianoche de aquí es la frontera que usa el EA (TimeTradeServer()) para
+  # resetear el contador de operaciones y el balance inicial del día.
+  # MetaQuotes-Demo y los brokers EU usan UTC+2 invierno / UTC+3 verano.
+  broker_tz: "Europe/Helsinki"
+  # Offset fijo en minutos. 0 = derivar de broker_tz (respeta el DST).
+  broker_utc_offset_minutes: 0
+
+# Símbolos que analiza y puntúa el copiloto (score SMC + killzone, watcher).
+# Por defecto, los 12 que publica la cuenta FTMO Demo; ajusta la lista a los
+# que publique TU bróker. Cada símbolo necesita su `sl_distance_by_symbol`.
+# La ejecución (órdenes) además pasa por `execution.symbols_allow`.
+symbols:
+  - symbol: AUDCAD
+    timeframe: M15
+  - symbol: AUDCHF
+    timeframe: M15
+  - symbol: AUDJPY
+    timeframe: M15
+  - symbol: AUDNZD
+    timeframe: M15
+  - symbol: AUDUSD
+    timeframe: M15
+  - symbol: EURJPY
+    timeframe: M15
+  - symbol: EURUSD
+    timeframe: M15
+  - symbol: GBPUSD
+    timeframe: M15
+  - symbol: USDCAD
+    timeframe: M15
+  - symbol: USDCHF
+    timeframe: M15
+  - symbol: USDJPY
+    timeframe: M15
+  - symbol: XAUUSD
+    timeframe: M15
+
+watcher:
+  enabled: true
+  scan_interval_sec: 30
+  # D-005: el watcher AVISA, no ejecuta. No hay auto-execute en este proyecto.
+  dedup_ttl_sec: 900
+
+copilot:
+  # Capas de niveles activas por defecto en el gráfico (D-003).
+  level_layers:
+    - smc
+    - swings
+    - pdh_pdl
+    - volume_profile
+    - round_numbers

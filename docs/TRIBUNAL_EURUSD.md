@@ -1,0 +1,161 @@
+# ⚖️ Tribunal Tripartito EUR/USD — Arquitectura y Guía Operativa
+
+> **Referencia de Decisión:** `.agent/DECISIONS.md` (`D-028`, `D-030`) · **Alcance:** Inteligencia consultiva y confluencia pre-orden para **EUR/USD** en cuentas FTMO ($25k). **Nunca auto-ejecuta órdenes**: la confirmación final sigue siendo siempre humana.
+
+---
+
+## 1. Propósito del Sistema
+
+Un modelo de lenguaje tradicional que recibe un solo prompt tiende al **sesgo de confirmación**: intenta justificar una dirección única y, si no tiene acceso a internet en tiempo real, puede inventar titulares o ignorar publicaciones macroeconómicas inminentes.
+
+El **Tribunal Tripartito EUR/USD** resuelve ambos problemas combinando:
+1. **Datos 100% reales y auditables en tiempo real** desde tres canales independientes (MetaTrader 5 + SMC, feeds RSS institucionales + Calendario Económico, y Google Search Grounding nativo de Gemini).
+2. **Razonamiento adversarial estructurado en 3 roles**: un **Fiscal Técnico** defiende la mejor tesis de precio/SMC, un **Abogado del Diablo** ataca esa tesis con noticias web y riesgos macro/calendario, y un **Juez Cuantitativo** emite sentencia imparcial con recomendación de riesgo FTMO (`0.50%`, `0.25%` o `0.00% VETO`).
+
+---
+
+## 2. Flujo de Datos y Arquitectura
+
+```mermaid
+flowchart TD
+    subgraph C1["Canal 1: MetaTrader 5 + Motor Puro (core/)"]
+        MT5["MarketService (Tick Bid/Ask, Spread)"]
+        VELAS["Velas M15 (200) + H1 (120) + Diarias (PDH/PDL)"]
+        SMC["core/smc_engine.py (FVGs, Order Blocks, Sweeps)"]
+        IND["core/eurusd_spot_tech_calc.py (SMA 20/50/100/200, RSI14, MACD)"]
+        MT5 --> IND
+        VELAS --> SMC
+        VELAS --> IND
+    end
+
+    subgraph C2["Canal 2: Feeds Institucionales Directos (api/services/)"]
+        RSS["RSS Paralelos: BCE, Reserva Federal, FXStreet, ForexLive"]
+        CAL["Calendario Económico Semanal (EUR y USD · High/Medium Impact)"]
+    end
+
+    subgraph C3["Canal 3: Buscador Web IA en Tiempo Real"]
+        GSEARCH["Gemini API + Herramienta Nativa google_search"]
+        CITES["Extracción de Citas Reales (url_citation / groundingChunks)"]
+        GSEARCH --> CITES
+    end
+
+    subgraph TRIB["Debate del Tribunal Tripartito"]
+        FISCAL["⚔️ Rol 1: Fiscal Técnico (Tesis MT5 + SMC)"]
+        DIABLO["🛡️ Rol 2: Abogado del Diablo (Antítesis Web + Macro)"]
+        JUEZ["⚖️ Rol 3: Juez Cuantitativo (Veredicto + Riesgo FTMO)"]
+        FISCAL --> JUEZ
+        DIABLO --> JUEZ
+    end
+
+    IND --> FISCAL
+    SMC --> FISCAL
+    RSS --> DIABLO
+    CAL --> DIABLO
+    CITES --> DIABLO
+    IND --> DIABLO
+
+    JUEZ --> SCHEMA["core/eurusd_spot_analysis_schema.py (Validación Pura)"]
+    SCHEMA --> DB[("database/trading.db\neurusd_spot_analysis_runs\neurusd_spot_analysis_sources")]
+    DB --> UI["Modal Tribunal EUR/USD + Badge Setup + Modal Confirmación Orden"]
+```
+
+### Frontera de Pureza (`AGENTS.md`)
+
+| Módulo | Capa | Responsabilidad | ¿Hace I/O? |
+| :--- | :--- | :--- | :---: |
+| `core/eurusd_spot_analysis_schema.py` | `core/` | Validación estricta del JSON, normalización del bloque `tribunal`, deduplicación de URLs y retrocompatibilidad con runs históricos. | **No (100% puro)** |
+| `core/eurusd_spot_tech_calc.py` | `core/` | Cálculo de `SMA`, `EMA`, `RSI14`, `MACD (12,26,9)`, resumen de microestructura SMC (`summarize_smc_and_structure`) y motor determinista del Tribunal (`build_deterministic_tribunal`). | **No (100% puro)** |
+| `api/services/eurusd_web_intel.py` | `api/services/` | Descarga paralela (`ThreadPoolExecutor`) de RSS y calendario macro, invocación HTTP a Gemini con `google_search` y fusión verificada de fuentes (`merge_grounded_sources`). | **Sí (HTTP/REST)** |
+| `api/services/eurusd_spot_analysis_service.py` | `api/services/` | Orquestación extremo a extremo (MT5 $\rightarrow$ Web $\rightarrow$ Tribunal $\rightarrow$ SQLite). | **Sí (MT5 + SQLite)** |
+| `api/services/setup_eval.py` | `api/services/` | Cruza el setup SMC de `EURUSD` (`BUY`/`SELL`) contra el último veredicto del Tribunal en `macro_confluence`. | **Sí (lectura SQLite)** |
+
+---
+
+## 3. Fuentes de Datos Reales y Whitelist Institucional
+
+### 3.1. MetaTrader 5 y Microestructura SMC
+- **Tick en vivo:** Bid, Ask y Spread en puntos reales del bróker conectado.
+- **Multi-timeframe:** 200 velas `M15` (rango 24h, cambio `%` 24h, medias y osciladores) + 120 velas `H1` (tendencia estructural superior).
+- **Niveles institucionales:** `PDH` y `PDL` (máximo y mínimo del día anterior cerrado) + soportes/resistencias por ventanas de swing (`20`, `60`, `120` velas).
+- **Patrones SMC activos (sin mitigar):** `BULLISH_FVG`, `BEARISH_FVG`, `BULLISH_OB`, `BEARISH_OB` y barridos recientes `PDH_SWEEP` / `PDL_SWEEP`.
+
+### 3.2. Feeds Directos y Calendario Económico (Recolección Paralela ~1.5 s)
+1. **Banco Central Europeo (BCE):** `https://www.ecb.europa.eu/rss/press.html` (comunicados de política monetaria y discursos).
+2. **Reserva Federal (FOMC):** `https://www.federalreserve.gov/feeds/press_all.xml` (decisiones de tasas y comunicados oficiales).
+3. **FXStreet News RSS:** `https://xml.fxstreet.com/news/forex-news/index.xml` (filtrando palabras clave macro/EUR/USD de las últimas 48 h).
+4. **ForexLive / InvestingLive RSS:** `https://www.forexlive.com/feed/news` (flujo institucional intradía de las últimas 48 h).
+5. **Calendario Económico Semanal:** `https://nfs.faireconomy.media/ff_calendar_thisweek.json`, filtrando exclusivamente eventos de **`EUR`** y **`USD`** con impacto **`High`** o **`Medium`** en la ventana `[-6h, +24h]` respecto al reloj UTC, calculando `minutes_to_event`.
+
+### 3.3. Google Search Grounding (Gemini API) y Whitelist
+Al invocar Gemini con `tools: [{"type": "google_search"}]` (API `v1beta/interactions`) o `tools: [{"google_search": {}}]` (`v1beta/models/{model}:generateContent`), Google ejecuta búsquedas reales en la web y devuelve las URLs citadas en los metadatos (`annotations` / `groundingChunks`).
+
+`merge_grounded_sources` prioriza dominios de la lista blanca institucional (`TRUSTED_DOMAINS`):
+- **Bancos centrales y organismos:** `ecb.europa.eu`, `federalreserve.gov`, `bls.gov`, `bea.gov`, `europa.eu`, `imf.org`, `bis.org`
+- **Agencias financieras:** `reuters.com`, `bloomberg.com`, `ft.com`, `wsj.com`, `cnbc.com`, `marketwatch.com`
+- **Portales FX especializados:** `fxstreet.com`, `forexlive.com`, `investinglive.com`, `dailyfx.com`, `investing.com`, `tradingeconomics.com`, `forexfactory.com`
+
+---
+
+## 4. Los 3 Roles del Debate y Niveles de Veredicto
+
+### Roles
+1. **⚔️ Fiscal Técnico (`thesis`):** Construye el argumento direccional (`BUY`, `SELL` o `NEUTRAL`) basándose en niveles exactos de MT5, alineación `M15`/`H1` y zonas SMC cercanas.
+2. **🛡️ Abogado del Diablo (`antithesis`):** Busca activamente por qué la operación podría tocar Stop Loss: divergencia `M15` vs `H1`, `RSI14` agotado (`>= 68` en compras o `<= 32` en ventas), bloques SMC contrarios, titulares adversos o noticias macro de alto impacto en agenda.
+3. **⚖️ Juez Cuantitativo (`verdict`):** Pondera ambos lados y dicta sentencia con estado, sesgo, confianza (`0–100`), riesgo sugerido y condición exacta de invalidación.
+
+### Matriz de Veredictos del Juez
+
+| Estado (`verdict.status`) | Riesgo FTMO Sugerido | Significado Operativo |
+| :--- | :---: | :--- |
+| `ALTA_CONFLUENCIA` | **`0.50%`** (Nominal) | Alineación técnica M15 + H1/SMC respaldada por el contexto macro y sin eventos explosivos inminentes. |
+| `RIESGO_REDUCIDO` | **`0.25%`** (Mitad) | Existe ventaja técnica en M15, pero el Abogado del Diablo detectó fricción macro, evento High-Impact hoy o divergencia con H1. |
+| `VETO` | **`0.00%`** (Esperar) | Publicación macroeconómica de Alto Impacto inminente (`-30` a `+90` min) o contradicción severa entre precio y catalizador fundamental. |
+| `NEUTRAL` | **`0.25%`** | Mercado comprimido en rango sin desplazamiento institucional claro; esperar sweep de extremos (`PDH`/`PDL` o swing). |
+
+### Transparencia de Origen (`tribunal.grounding_mode`)
+El sistema etiqueta siempre de dónde provino la inteligencia web en cada ejecución:
+- `gemini_google_search`: Gemini deliberó con búsqueda web Google Search activa + RSS + MT5.
+- `rss_plus_gemini`: Gemini deliberó sobre los feeds RSS/calendario vivos + MT5 (sin citas adicionales de Google Search).
+- `rss_plus_deterministic`: Sin llamada a LLM (o cuota agotada), pero usando feeds RSS/calendario reales + motor cuantitativo puro MT5/SMC.
+- `deterministic_fallback`: Modo 100% local/offline usando únicamente datos de MT5/SMC y el motor determinista puro.
+
+---
+
+## 5. Configuración y Uso
+
+### Variables en `.env`
+```ini
+# Clave de Google AI Studio (habilita la deliberación IA del Tribunal)
+GEMINI_API_KEY=tu_clave_aqui
+
+# Modelo Gemini principal vigente (cascada automática: gemini-3.8-flash -> gemini-3.5-flash-lite -> gemini-3.1-flash-lite)
+GEMINI_MODEL=gemini-3.8-flash
+LITELLM_MODEL=gemini-3.8-flash
+```
+> **Cascada Inteligente de Modelos y Cuotas (Free Tier vs. Billing):**
+> 1. **Pasada 1 (`gemini_google_search`):** Intenta invocar la Interactions API (`v1beta/interactions`) con la herramienta nativa `google_search` activa.
+> 2. **Pasada 2 (`rss_plus_gemini`):** Si tu clave de Google AI Studio está en capa gratuita sin cuota de `google_search` (`HTTP 429`) o un modelo reporta alta demanda (`HTTP 503`), el sistema **salta automáticamente** al siguiente modelo vigente (`gemini-3.5-flash-lite` / `gemini-3.1-flash-lite`) deliberando sobre los **titulares RSS institucionales en vivo + Calendario Macroeconómico + datos reales de MT5/SMC** ya recolectados.
+> 3. **Pasada 3 (`rss_plus_deterministic` / `deterministic_fallback`):** Si `GEMINI_API_KEY` está vacía o no hay internet, ejecuta sin fallar el motor cuantitativo puro `build_deterministic_tribunal` desde `core/eurusd_spot_tech_calc.py`.
+
+### Ejecución desde el Dashboard Web
+1. Inicia el servidor: `python app.py` y abre `http://127.0.0.1:8000`.
+2. Haz clic en **`📊 Análisis EUR/USD`** en la barra superior.
+3. Pulsa **`⚡ Generar Ahora`** para lanzar el Tribunal en tiempo real (`POST /api/analysis/eurusd-spot/run?force=true`).
+4. Al seleccionar `EURUSD` en el panel derecho (**Copilot SMC & Ejecución**) y al abrir el modal de confirmación de orden (`BUY` / `SELL`), verás automáticamente el badge del **Veredicto del Tribunal** y su recomendación de riesgo.
+
+### Ejecución por Consola o Tarea Programada (4 sesiones/día: `07`, `11`, `14`, `18` UTC)
+```powershell
+cd ftmo_dashboard
+python scripts/run_eurusd_spot_analysis.py --force
+```
+*(Añade `--no-llm` si deseas forzar únicamente el motor determinista + MT5 sin consumir API de Gemini).*
+
+### Endpoints HTTP
+
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| `POST` | `/api/analysis/eurusd-spot/run?force=true` | Ejecuta el pipeline completo en vivo (MT5 + RSS + Calendario + Gemini Google Search) y guarda en `trading.db`. |
+| `GET` | `/api/analysis/eurusd-spot/latest` | Devuelve el último reporte completo incluyendo `tribunal`, `calendar_today`, `technical.smc_summary` y `sources`. |
+| `GET` | `/api/analysis/eurusd-spot/history?limit=20` | Lista las ejecuciones guardadas con su `verdict_status`, `bias`, `confidence` y `price_current`. |
+| `GET` | `/api/analysis/eurusd-spot/by-run?run_key=YYYY-MM-DD_HH` | Recupera el reporte íntegro de una sesión específica. |
+| `GET` | `/api/chart/setup-eval?symbol=EURUSD` | Incluye el bloque `macro_confluence` enriquecido con `verdict_status`, `recommended_risk_pct` y `ruling`. |
