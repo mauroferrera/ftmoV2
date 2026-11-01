@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-brightgreen.svg)
 ![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-orange.svg)
-![Tests](https://img.shields.io/badge/tests-754%20passed-success.svg)
+![Tests](https://img.shields.io/badge/tests-761%20passed-success.svg)
 ![Architecture](https://img.shields.io/badge/architecture-Pure%20Core%20%2B%20FastAPI-informational.svg)
 
 **Plataforma algorítmica cuantitativa y copiloto determinista para challenges de prop firms (FTMO $25K 1-Step & 2-Step) sobre MetaTrader 5.**
@@ -62,6 +62,15 @@ Opera en modo **Copiloto Asistido** (análisis, confirmación humana y métricas
 * **Protección FTMO:** Hard gates de 3 operaciones diarias, límite de pérdida diaria y trailing drawdown.
 * **Interruptor UI:** Toggle interactivo `[ 🤖 AUTÓNOMO: ON / OFF ]` con protección de token.
 
+### 📈 6. Reconciliación de Resultados & Auditoría Cuantitativa (M20 - P0)
+* **Reconciliación Automática MT5:** Sincroniza cada deal de salida (`history_deals_get`) con su orden de entrada y `setup_log` de forma idempotente en `trade_marks`.
+* **Cómputo Financiero Riguroso:** PnL neto real descontando comisiones y swaps completos de entrada y salida.
+* **R-Múltiplo Realizado:** Mide el rendimiento exacto sobre la distancia real del Stop Loss planificado:
+  $$R = \frac{\Delta P}{|P_{open} - SL|}$$
+* **Clasificación Post-Mortem:** Separa salidas por `TP`, `SL`, `BE` (Break-Even), `TP_PARTIAL` y manuales.
+* **Excursiones MAE & MFE:** Registra la máxima excursión adversa y favorable en R para auditar si los stops son barridos por ruido.
+* **Métricas Institucionales:** Endpoint `/api/audit/performance` con Expectancy en R, Profit Factor, desglose por buckets de score (`<60`, `60-70`, `70-80`, `80+`) y rentabilidad por par.
+
 ---
 
 ## 🏛 Arquitectura del Sistema
@@ -83,10 +92,10 @@ ftmo_dashboard/
 │   └── tradingview/           # Futuros CME en tiempo real vía WebSocket
 ├── api/                 # Backend FastAPI
 │   ├── routes/                # Endpoints delgados (market, trade, autotrader, audit)
-│   └── services/              # Orquestadores (AutoTraderService, MarketService)
+│   └── services/              # Orquestadores (ReconciliationService, AutoTraderService, MarketService)
 ├── database/            # Capa de persistencia SQLite (trading.db)
 ├── static/              # Dashboard interactivo (TradingView Lightweight Charts v4)
-└── tests/               # 754 tests automatizados (unitarios y de integración)
+└── tests/               # 761 tests automatizados (unitarios y de integración)
 ```
 
 ---
@@ -150,7 +159,7 @@ El copiloto analiza y opera los 12 pares principales de FTMO en **M15**:
 4. **Verificar la suite de pruebas:**
    ```powershell
    python -m pytest
-   # 754 passed en verde
+   # 761 passed en verde
    ```
 
 5. **Iniciar el Dashboard:**
@@ -163,17 +172,21 @@ El copiloto analiza y opera los 12 pares principales de FTMO en **M15**:
 
 ## 📈 Análisis de Rendimiento y Post-Mortem
 
-El sistema audita de forma persistente cada decisión en `database/trading.db`. Puedes consultar las métricas de rendimiento en cualquier momento con:
+El sistema audita de forma persistente cada decisión en `database/trading.db`. Puedes consultar las métricas de rendimiento y forzar reconciliaciones con:
 
 ```http
 GET /api/audit/performance
+POST /api/audit/reconcile?days=30
+GET /api/audit/marks?limit=100
 ```
 
 Respuesta estructurada con:
-* Tasa de acierto global (*Winrate %*).
-* Ratio R promedio obtenido.
-* Principales motivos de descarte y rechazo institucional.
-* Historial de trades cerrados con su respectivo ticket de MT5.
+* Tasa de acierto global (*Winrate %*), *Expectancy en R* y *Profit Factor*.
+* Desglose por buckets de score (`<60`, `60-70`, `70-80`, `80+`).
+* Desglose por símbolo y por motivo de salida (`TP`, `SL`, `BE`, `PARTIAL`, manual).
+* Historial de trades cerrados emparejados con su respectivo ticket de MT5.
+
+Para más detalles técnicos, consulta el documento [M20 — Reconciliación de Deals MT5 y Auditoría Post-Mortem](docs/M20_RECONCILIACION_AUDITORIA.md).
 
 ---
 

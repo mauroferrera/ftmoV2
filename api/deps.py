@@ -113,6 +113,17 @@ def watcher_service(rt: Runtime) -> Any:
     return svc
 
 
+def reconciliation_service(rt: Runtime) -> Any:
+    """El servicio de reconciliación de resultados. 503 si no está cableado."""
+    svc = getattr(rt, "reconciliation", None)
+    if svc is None:
+        raise HTTPException(
+            status_code=503,
+            detail="reconciliación no cableada: falta Runtime.build() con reconciliation",
+        )
+    return svc
+
+
 def runtime_para_cuenta(rt: Runtime, account: Optional[str]) -> Runtime:
     """El runtime para la cuenta pedida, o el de la runtime.
 

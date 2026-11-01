@@ -143,6 +143,14 @@ class AutoTraderService:
             log.warning("Fallo en evaluación y auto-ejecución: %s", exc)
             results["skipped_reasons"].append(f"Auto-ejecución error: {exc}")
 
+        # 3. Reconciliación de Deals Cerrados -> trade_marks (M20)
+        try:
+            recon = getattr(rt, "reconciliation", None)
+            if recon is not None:
+                recon.reconcile_closed_trades(days=7)
+        except Exception as exc:
+            log.warning("Fallo en reconciliación de deals: %s", exc)
+
         return results
 
     def _auto_manage_open_positions(self) -> List[Dict[str, Any]]:

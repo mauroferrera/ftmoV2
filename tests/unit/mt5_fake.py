@@ -204,6 +204,47 @@ class FakeTradeResult:
         self.comment = str(comment)
 
 
+class FakeDeal:
+    """Deal de MT5 (`history_deals_get` devuelve estos objetos)."""
+
+    def __init__(
+        self,
+        ticket: int = 1,
+        order: int = 1,
+        time: int = 1700000000,
+        type: int = 0,
+        entry: int = 0,
+        magic: int = 0,
+        position_id: int = 1,
+        reason: int = 0,
+        volume: float = 0.1,
+        price: float = 1.0850,
+        commission: float = 0.0,
+        swap: float = 0.0,
+        profit: float = 0.0,
+        fee: float = 0.0,
+        symbol: str = "EURUSD",
+        comment: str = "",
+    ) -> None:
+        self.ticket = int(ticket)
+        self.order = int(order)
+        self.time = int(time)
+        self.time_msc = int(time) * 1000
+        self.type = int(type)
+        self.entry = int(entry)
+        self.magic = int(magic)
+        self.position_id = int(position_id)
+        self.reason = int(reason)
+        self.volume = float(volume)
+        self.price = float(price)
+        self.commission = float(commission)
+        self.swap = float(swap)
+        self.profit = float(profit)
+        self.fee = float(fee)
+        self.symbol = str(symbol)
+        self.comment = str(comment)
+
+
 class FakeMT5(types.ModuleType):
     """Módulo MT5 falso. Se instancia y se registra en `sys.modules`."""
 
@@ -261,6 +302,8 @@ class FakeMT5(types.ModuleType):
 
         # Posiciones abiertas que devuelve `positions_get`.
         self.positions: List[Any] = []
+        # Deals pasados que devuelve `history_deals_get`.
+        self.history_deals: List[Any] = []
 
         # -- ejecución --------------------------------------------------------
         #: Qué devuelve `order_send`. None = el bróker no contesta (un hecho, no
@@ -435,6 +478,22 @@ class FakeMT5(types.ModuleType):
         if symbol is not None:
             return tuple(p for p in self.positions if p.symbol == symbol)
         return tuple(self.positions)
+
+    def history_deals_get(
+        self,
+        date_from: Optional[Any] = None,
+        date_to: Optional[Any] = None,
+        group: Optional[str] = None,
+        ticket: Optional[int] = None,
+        position: Optional[int] = None,
+    ):
+        """`history_deals_get` por ticket, position o rango de fechas."""
+        self.calls.append(("history_deals_get", date_from, date_to, group, ticket, position))
+        if position is not None:
+            return tuple(d for d in self.history_deals if getattr(d, "position_id", None) == int(position))
+        if ticket is not None:
+            return tuple(d for d in self.history_deals if getattr(d, "ticket", None) == int(ticket))
+        return tuple(self.history_deals)
 
     # -- precios ---------------------------------------------------------------
 

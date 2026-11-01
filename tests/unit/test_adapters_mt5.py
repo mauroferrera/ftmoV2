@@ -532,6 +532,34 @@ class TestCuentaYPosiciones:
         with pytest.raises(TerminalUnavailable):
             MT5ForexAdapter(Session()).account_info()
 
+    def test_history_deals_llegan_normalizados(self, adp, mt5):
+        from tests.unit.mt5_fake import FakeDeal
+        mt5.history_deals = [
+            FakeDeal(ticket=101, order=501, position_id=201, symbol="EURUSD",
+                     entry=0, type=0, price=1.0850, volume=0.5),
+            FakeDeal(ticket=102, order=502, position_id=201, symbol="EURUSD",
+                     entry=1, type=1, price=1.0890, volume=0.5, profit=200.0,
+                     reason=5),
+        ]
+        deals = adp.history_deals()
+        assert len(deals) == 2
+        assert deals[0]["ticket"] == 101
+        assert deals[0]["entry"] == 0
+        assert deals[1]["ticket"] == 102
+        assert deals[1]["entry"] == 1
+        assert deals[1]["profit"] == pytest.approx(200.0)
+        assert deals[1]["reason"] == 5
+
+    def test_history_deals_filtra_por_posicion(self, adp, mt5):
+        from tests.unit.mt5_fake import FakeDeal
+        mt5.history_deals = [
+            FakeDeal(ticket=101, position_id=201, symbol="EURUSD"),
+            FakeDeal(ticket=102, position_id=202, symbol="GBPUSD"),
+        ]
+        deals = adp.history_deals(position_id=201)
+        assert len(deals) == 1
+        assert deals[0]["position_id"] == 201
+
 
 # ---------------------------------------------------------------------------
 # Inyección de sesión

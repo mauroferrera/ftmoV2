@@ -39,7 +39,7 @@ class Runtime:
     """
 
     __slots__ = ("store", "market", "prop", "watcher", "execution", "account_id",
-                 "autotrader", "_store_backend")
+                 "autotrader", "_store_backend", "reconciliation")
 
     def __init__(
         self,
@@ -51,6 +51,7 @@ class Runtime:
         execution: Optional[Any] = None,
         account_id: Optional[str] = None,
         autotrader: Optional[Any] = None,
+        reconciliation: Optional[Any] = None,
     ) -> None:
         self.store = store
         self.market = market
@@ -59,6 +60,7 @@ class Runtime:
         self.execution = execution
         self.account_id = account_id
         self.autotrader = autotrader
+        self.reconciliation = reconciliation
         self._store_backend = "inyectado" if store is not None else None
 
     @classmethod
@@ -90,6 +92,7 @@ class Runtime:
         rt.prop = cls._build_prop(rt.store, rt.market)
         rt.watcher = cls._build_watcher(rt.store, rt.market)
         rt.execution = cls._build_execution(account_id=account_id)
+        rt.reconciliation = cls._build_reconciliation(rt.market, rt.store, rt.execution)
         rt.autotrader = cls._build_autotrader(rt, account_id=account_id)
         return rt
 
@@ -167,6 +170,18 @@ class Runtime:
             return AutoTraderService(runtime=rt, scan_interval_sec=30, account_id=account_id)
         except Exception as exc:  # noqa: BLE001
             log.warning("autotrader no disponible: %s", exc)
+            return None
+
+    @staticmethod
+    def _build_reconciliation(market: Optional[Any], store: Optional[Any],
+                              execution: Optional[Any] = None) -> Optional[Any]:
+        """El servicio de reconciliación de resultados y trade marks (M20)."""
+        try:
+            from api.services.reconciliation import ReconciliationService
+
+            return ReconciliationService(market=market, store=store, execution=execution)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("reconciliación no disponible: %s", exc)
             return None
 
     # -- ciclo de vida -----------------------------------------------------------

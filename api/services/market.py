@@ -140,6 +140,18 @@ class MarketService:
         """Posiciones abiertas. `[]` es una respuesta legítima: no tener ninguna."""
         return self._adapter.positions(symbol)
 
+    def history_deals(
+        self,
+        days: int = 30,
+        position_id: Optional[int] = None,
+        ticket: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Historial de deals cerrados en el bróker."""
+        fn = getattr(self._adapter, "history_deals", None)
+        if fn is None:
+            return []
+        return fn(days=days, position_id=position_id, ticket=ticket)
+
     def position(self, ticket: int) -> Optional[Dict[str, Any]]:
         """UNA posición por ticket, o `None`.
 

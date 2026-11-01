@@ -30,6 +30,7 @@ pide lo primero.
 
 from __future__ import annotations
 
+import datetime
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -628,6 +629,31 @@ class MT5ForexAdapter:
 
         return self._session.call(_get, account=self._account_id)
 
+    def history_deals(
+        self,
+        days: int = 30,
+        position_id: Optional[int] = None,
+        ticket: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Historial de deals cerrados/ejecutados en MT5.
+
+        Permite filtrar por posición (position_id), por ticket de deal, o por
+        ventana de tiempo en días (por defecto 30 días atrás).
+        """
+
+        def _get(mt5) -> List[Dict[str, Any]]:
+            if position_id is not None:
+                crudas = mt5.history_deals_get(position=int(position_id))
+            elif ticket is not None:
+                crudas = mt5.history_deals_get(ticket=int(ticket))
+            else:
+                ahora = datetime.datetime.now()
+                desde = ahora - datetime.timedelta(days=max(1, int(days)))
+                crudas = mt5.history_deals_get(desde, ahora)
+            return [_fila_deal(d) for d in filas_o_vacias(crudas)]
+
+        return self._session.call(_get, account=self._account_id)
+
     def account_info(self) -> Dict[str, Any]:
         """Balance, equity, flotante y margen. Lanza si la terminal no responde.
 
@@ -673,6 +699,29 @@ def _fila_posicion(pos: Any) -> Dict[str, Any]:
         "magic": int(getattr(pos, "magic", 0) or 0),
         "comment": str(getattr(pos, "comment", "") or ""),
         "time": int(getattr(pos, "time", 0) or 0),
+    }
+
+
+def _fila_deal(deal: Any) -> Dict[str, Any]:
+    """Deal de MT5 -> dict normalizado, sin inventar ceros donde no hay dato."""
+    return {
+        "ticket": int(getattr(deal, "ticket", 0) or 0),
+        "order": int(getattr(deal, "order", 0) or 0),
+        "time": int(getattr(deal, "time", 0) or 0),
+        "time_msc": int(getattr(deal, "time_msc", 0) or 0),
+        "type": int(getattr(deal, "type", 0) or 0),
+        "entry": int(getattr(deal, "entry", 0) or 0),
+        "magic": int(getattr(deal, "magic", 0) or 0),
+        "position_id": int(getattr(deal, "position_id", 0) or 0),
+        "reason": int(getattr(deal, "reason", 0) or 0),
+        "volume": float(getattr(deal, "volume", 0.0) or 0.0),
+        "price": float(getattr(deal, "price", 0.0) or 0.0),
+        "commission": float(getattr(deal, "commission", 0.0) or 0.0),
+        "swap": float(getattr(deal, "swap", 0.0) or 0.0),
+        "profit": float(getattr(deal, "profit", 0.0) or 0.0),
+        "fee": float(getattr(deal, "fee", 0.0) or 0.0),
+        "symbol": str(getattr(deal, "symbol", "") or ""),
+        "comment": str(getattr(deal, "comment", "") or ""),
     }
 
 
