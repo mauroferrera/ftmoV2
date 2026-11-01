@@ -95,3 +95,4 @@ def test_get_trade_marks_endpoint(audit_client):
     assert len(marks) == 1
     assert marks[0]["ticket"] == 8801
     assert marks[0]["symbol"] == "EURUSD"
+

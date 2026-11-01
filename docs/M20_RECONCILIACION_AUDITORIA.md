@@ -89,3 +89,4 @@ El endpoint `/api/audit/performance` ahora entrega métricas cuantitativas compl
 ## 5. Automatización en el AutoTrader
 
 En `api/services/autotrader.py`, el método `run_cycle` invoca automáticamente `reconcile_closed_trades(days=7)` al final de cada iteración, garantizando que tan pronto como una posición se cierre en el broker (por TP, SL o trailing), se concilie de inmediato sin intervención del usuario.
+

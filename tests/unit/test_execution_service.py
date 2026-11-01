@@ -1603,3 +1603,31 @@ def test_sl_distance_no_positiva_es_rechazada():
     assert cuerpo["status"] == "INVALID_SL_DISTANCE"
     assert puerto.envios == []
 
+
+def test_sl_estructural_nivel_absoluto_y_dimensionado_real():
+    # Entrada ASK = 1.10012
+    # Nivel de SL estructural explícito = 1.09812 (20 pips = 0.00200)
+    # TP a 2R = 1.10412 (40 pips = 0.00400)
+    puerto = PuertoFalso()
+    prop = PropFalso(day_trades_count=0)
+    svc = _servicio(prop=prop, puerto=puerto)
+    cuerpo, status = _ejecuta(svc, sl=1.09812, tp=1.10412, sl_distance=None, tp_distance=None, volume=None)
+    assert status == 200
+    assert cuerpo["ok"] is True
+    assert puerto.envios[0]["sl"] == pytest.approx(1.09812)
+    assert puerto.envios[0]["tp"] == pytest.approx(1.10412)
+    # Lote debe estar dimensionado para 20 pips y riesgo 0.25% (verdict APROBADO = riesgo reducido mitad):
+    # Riesgo = $62.50. Con tick_value=10.0 por pip y 20 pips, lote = 62.5 / (20 * 10) = 0.31 lots
+    assert puerto.envios[0]["volume"] == pytest.approx(0.31, abs=0.01)
+
+
+def test_sl_invalido_lado_contrario_es_rechazado():
+    puerto = PuertoFalso()
+    svc = _servicio(puerto=puerto)
+    # BUY con SL por encima del precio de entrada (1.10012)
+    cuerpo, status = _ejecuta(svc, action="BUY", sl=1.10500)
+    assert status == 400
+    assert cuerpo["status"] == "INVALID_SL_LEVEL"
+    assert puerto.envios == []
+
+

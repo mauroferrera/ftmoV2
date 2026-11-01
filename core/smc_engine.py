@@ -21,6 +21,8 @@ from __future__ import annotations
 from bisect import bisect_right
 from typing import List, Optional, Tuple
 
+from core.indicators import calculate_atr
+
 BULLISH_FVG = "BULLISH_FVG"
 BEARISH_FVG = "BEARISH_FVG"
 BULLISH_OB = "BULLISH_OB"
@@ -218,6 +220,7 @@ def analyze(candles: List[dict], pdh: Optional[float], pdl: Optional[float],
             "order_blocks": detect_order_blocks(candles),
             "sweeps": detect_sweeps(candles, pdh, pdl, min_time=min_sweep_time),
         },
+        "atr_14": calculate_atr(candles, period=14),
     }
 
 

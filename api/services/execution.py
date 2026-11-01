@@ -350,7 +350,9 @@ class ExecutionService:
                              context: Optional[Dict[str, Any]] = None,
                              timeframe: str = DEFAULT_TIMEFRAME,
                              source: str = "",
-                             force: bool = False) -> Tuple[Dict[str, Any], int]:
+                             force: bool = False,
+                             sl: Optional[float] = None,
+                             tp: Optional[float] = None) -> Tuple[Dict[str, Any], int]:
         """`(cuerpo, status)`. El status lo elige el servicio, no la ruta.
 
         Que sea aquí y no en el handler es lo que hace que el watcher y la API
@@ -435,8 +437,30 @@ class ExecutionService:
                              "a mercado sin precio.".format(simbolo),
                     "symbol": simbolo, "status": "PRICE_UNAVAILABLE"}, 503
 
-        # -- 4b. Distancias ----------------------------------------------------
-        if sl_distance is None:
+        # -- 4b. Distancias y Niveles Estructurales ----------------------------
+        digits = getattr(spec, "digits", 5) if spec else 5
+        signo = 1.0 if acc == "BUY" else -1.0
+
+        if sl is not None:
+            sl_val = round(float(sl), digits)
+            calc_dist = (entrada - sl_val) if acc == "BUY" else (sl_val - entrada)
+            if calc_dist <= 0:
+                return {
+                    "error": f"SL para {acc} ({sl_val}) debe quedar del lado correcto de la entrada ({entrada}).",
+                    "symbol": simbolo,
+                    "status": "INVALID_SL_LEVEL",
+                }, 400
+            sl = sl_val
+            sl_distance = calc_dist
+            origen_sl = "structural_request"
+        elif sl_distance is not None:
+            sl_distance = float(sl_distance)
+            if sl_distance <= 0:
+                return {"error": f"Distancia de stop loss inválida: {sl_distance} <= 0.",
+                        "symbol": simbolo, "status": "INVALID_SL_DISTANCE"}, 400
+            sl = round(entrada - signo * sl_distance, digits)
+            origen_sl = "request"
+        else:
             sl_distance, origen_sl = strategy.sl_distance_for(cfg, simbolo, spec)
             if sl_distance is None:
                 clave = "sl_distance_by_symbol.{0}".format(simbolo) if simbolo else "sl_distance"
@@ -444,23 +468,27 @@ class ExecutionService:
                                  "(strategy.yaml: sl_distance o "
                                  "sl_distance_by_symbol): no se inventa un stop.".format(clave),
                         "symbol": simbolo, "status": "NO_SL_DISTANCE"}, 400
-        else:
-            origen_sl = "request"
-        sl_distance = float(sl_distance)
-        if sl_distance <= 0:
-            return {"error": f"Distancia de stop loss inválida: {sl_distance} <= 0.",
-                    "symbol": simbolo, "status": "INVALID_SL_DISTANCE"}, 400
+            sl_distance = float(sl_distance)
+            sl = round(entrada - signo * sl_distance, digits)
 
-        # Niveles a partir del precio REAL de entrada, no de un precio guardado.
-        signo = 1.0 if acc == "BUY" else -1.0
-        sl = entrada - signo * sl_distance
         if no_tp:
-            if tp_distance is not None:
-                avisos.append("no_tp=True: se ignora tp_distance y la orden sale "
+            if tp_distance is not None or tp is not None:
+                avisos.append("no_tp=True: se ignora tp/tp_distance y la orden sale "
                               "sin objetivo (la salida la decide la política de "
                               "salida de la estrategia).")
             tp_distance = None
             tp = None
+        elif tp is not None:
+            tp_val = round(float(tp), digits)
+            calc_tp_dist = (tp_val - entrada) if acc == "BUY" else (entrada - tp_val)
+            if calc_tp_dist <= 0:
+                return {
+                    "error": f"TP para {acc} ({tp_val}) debe quedar del lado correcto de la entrada ({entrada}).",
+                    "symbol": simbolo,
+                    "status": "INVALID_TP_LEVEL",
+                }, 400
+            tp = tp_val
+            tp_distance = calc_tp_dist
         else:
             if tp_distance is None:
                 tp_distance = sl_distance * strategy.tp_ratio_for(cfg)
@@ -468,7 +496,7 @@ class ExecutionService:
             if tp_distance <= 0:
                 return {"error": f"Distancia de take profit inválida: {tp_distance} <= 0.",
                         "symbol": simbolo, "status": "INVALID_TP_DISTANCE"}, 400
-            tp = entrada + signo * tp_distance
+            tp = round(entrada + signo * tp_distance, digits)
 
         if acc == "BUY":
             if sl >= entrada:

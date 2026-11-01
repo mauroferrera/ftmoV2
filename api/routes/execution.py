@@ -88,6 +88,8 @@ class TradeMarketBody(BaseModel):
     symbol: str
     action: str = "BUY"
     volume: Optional[float] = None
+    sl: Optional[float] = None
+    tp: Optional[float] = None
     sl_distance: Optional[float] = None
     tp_distance: Optional[float] = None
     no_tp: bool = False
@@ -159,6 +161,7 @@ def post_trade_market(
     """
     orden = dict(
         symbol=body.symbol, action=body.action, volume=body.volume,
+        sl=body.sl, tp=body.tp,
         sl_distance=body.sl_distance, tp_distance=body.tp_distance, no_tp=body.no_tp,
         magic=body.magic, comment=body.comment, deviation=body.deviation,
         score=body.score, verdict=body.verdict, invalidate_level=body.invalidate_level,

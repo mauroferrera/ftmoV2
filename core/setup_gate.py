@@ -37,7 +37,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from core import risk_engine, strategy
+from core import indicators, risk_engine, strategy
 
 #: R:R por defecto cuando la config no declara `tp_ratio_r`. Es el 2.0 de REF: con un
 #: valor accidentalmente nulo el TP caería en la propia entrada y el "plan" sería una
@@ -45,8 +45,8 @@ from core import risk_engine, strategy
 DEFAULT_TP_RATIO = 2.0
 
 #: Múltiplo de la distancia de SL que se admite entre el precio y la zona de entrada.
-#: Acotado a 3.0 para evitar seleccionar zonas lejanas que ya no corresponden a la sesión.
-ENTRY_ZONE_MAX_SPAN_SL_MULT = 3.0
+#: Acotado a 0.5 para coherencia estricta con max_slippage_sl_share de execution_quality.
+ENTRY_ZONE_MAX_SPAN_SL_MULT = 0.5
 
 #: Fallback ABSOLUTO en precio, solo cuando no se conoce ninguna distancia de SL.
 ENTRY_ZONE_MAX_SPAN = 0.01
@@ -307,8 +307,37 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     zone_too_far = zone.get("reason") == ZONE_TOO_FAR
 
     digits = _spec_attr(spec, "digits", 6)
-    levels = plan_levels(entry, direction, sl_dist, tp_ratio, digits=digits)
-    sl, tp = levels["sl"], levels["tp"]
+    point = _spec_attr(spec, "point", 0.00001)
+
+    analysis = snapshot.get("analysis") or {}
+    atr_val = _num(analysis.get("atr_14")) or _num(snapshot.get("atr_14")) or 0.0
+    spread_val = _num(snapshot.get("spread_price")) or 0.0
+    target_magnet = _num(((analysis.get("htf_context") or {}).get("liquidity_magnet") or {}).get("price"))
+
+    distal_level = invalidation if elegida else None
+    if sl_dist is None:
+        sl = None
+        tp = None
+        effective_sl_dist = None
+        effective_tp_dist = None
+        struct_levels = {"is_structural": False, "magnet_applied": False}
+    else:
+        struct_levels = indicators.structural_sl_and_tp(
+            entry=entry,
+            direction=direction,
+            distal=distal_level,
+            atr=atr_val,
+            spread=spread_val,
+            tick_size=point,
+            sl_min=sl_dist,
+            tp_ratio=tp_ratio or DEFAULT_TP_RATIO,
+            target_magnet=target_magnet,
+            digits=digits,
+        )
+        sl = struct_levels["sl"]
+        tp = struct_levels["tp"]
+        effective_sl_dist = struct_levels["sl_distance"]
+        effective_tp_dist = struct_levels["tp_distance"]
 
     validation: Dict[str, Any]
     try:
@@ -322,6 +351,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
 
     approved = bool(
         score >= umbral
+        and sl_dist is not None
         and sl is not None
         and not zone_too_far
         and not scores_empatados
@@ -359,13 +389,16 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         "zone_reason": zone.get("reason"),
         "sl": sl,
         "tp": tp,
-        "sl_distance": sl_dist,
-        "sl_distance_source": sl_origin,
+        "sl_distance": effective_sl_dist,
+        "sl_distance_source": "structural_atr" if struct_levels["is_structural"] else sl_origin,
         "tp_ratio_r": tp_ratio if tp_ratio is not None else DEFAULT_TP_RATIO,
         "invalidate_level": invalidation,
         "unit_label": str(_spec_attr(spec, "unit_label", "") or ""),
         "approved": approved,
         "reasons": reasons,
+        "is_structural_sl": struct_levels["is_structural"],
+        "atr_14": atr_val,
+        "magnet_applied": struct_levels["magnet_applied"],
     }
 
 

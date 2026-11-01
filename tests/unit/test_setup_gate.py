@@ -123,7 +123,7 @@ class TestPlanLevels:
         assert out["sl"] is None and out["tp"] is None
 
     def test_span_es_multiplo_de_sl(self):
-        assert setup_gate.max_zone_span(CFG, 0.0012) == 0.0012 * 3.0
+        assert setup_gate.max_zone_span(CFG, 0.0012) == 0.0012 * 0.5
 
     def test_span_absoluto_sin_sl(self):
         assert setup_gate.max_zone_span({}, None) == setup_gate.ENTRY_ZONE_MAX_SPAN

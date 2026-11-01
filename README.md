@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-brightgreen.svg)
 ![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-orange.svg)
-![Tests](https://img.shields.io/badge/tests-761%20passed-success.svg)
+![Tests](https://img.shields.io/badge/tests-775%20passed-success.svg)
 ![Architecture](https://img.shields.io/badge/architecture-Pure%20Core%20%2B%20FastAPI-informational.svg)
 
 **Plataforma algorítmica cuantitativa y copiloto determinista para challenges de prop firms (FTMO $25K 1-Step & 2-Step) sobre MetaTrader 5.**
@@ -86,6 +86,7 @@ ftmo_dashboard/
 │   ├── risk_engine.py         # Setup score (SMC 85% + Killzone 15%)
 │   ├── exit_policy.py         # Gestión parcial escalada y Break-Even
 │   ├── prop_rules.py          # Reglas del challenge FTMO (1-Step / 2-Step)
+│   ├── indicators.py          # ATR(14) Wilder, SL estructural y colchón dinámico
 │   └── institutional_volume.py# Futuros CME, absorción y divergencias SMT
 ├── adapters/            # Conexión externa aislada
 │   ├── mt5/                   # Terminal MT5 (Forex spot, lectura y órdenes)
@@ -95,7 +96,7 @@ ftmo_dashboard/
 │   └── services/              # Orquestadores (ReconciliationService, AutoTraderService, MarketService)
 ├── database/            # Capa de persistencia SQLite (trading.db)
 ├── static/              # Dashboard interactivo (TradingView Lightweight Charts v4)
-└── tests/               # 761 tests automatizados (unitarios y de integración)
+└── tests/               # 775 tests automatizados (unitarios y de integración)
 ```
 
 ---
@@ -159,7 +160,7 @@ El copiloto analiza y opera los 12 pares principales de FTMO en **M15**:
 4. **Verificar la suite de pruebas:**
    ```powershell
    python -m pytest
-   # 761 passed en verde
+   # 775 passed en verde
    ```
 
 5. **Iniciar el Dashboard:**

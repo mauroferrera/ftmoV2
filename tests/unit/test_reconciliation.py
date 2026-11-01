@@ -307,3 +307,4 @@ def test_performance_analysis_metricas(clean_db):
     syms = analysis["by_symbol"]
     assert syms["EURUSD"]["trades"] == 2
     assert syms["XAUUSD"]["trades"] == 1
+

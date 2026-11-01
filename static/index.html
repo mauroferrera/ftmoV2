@@ -4013,6 +4013,12 @@
         setReplicateAll(false);
       }
 
+      if (t.sl != null) {
+        body.sl = t.sl;
+      }
+      if (t.tp != null) {
+        body.tp = t.tp;
+      }
       if (t.sl_distance != null && t.sl_distance > 0) {
         body.sl_distance = t.sl_distance;
       }
