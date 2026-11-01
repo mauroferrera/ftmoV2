@@ -316,30 +316,62 @@ def _index_of_time(candles: List[dict], ts: int) -> Optional[int]:
     return None
 
 
+def _calculate_ema(values: List[float], period: int = 9) -> List[float]:
+    """Cálculo puro de media móvil exponencial (EMA) sin dependencias externas."""
+    if not values:
+        return []
+    p = max(1, min(period, len(values)))
+    k = 2.0 / (p + 1.0)
+    ema = [values[0]]
+    for v in values[1:]:
+        ema.append(v * k + ema[-1] * (1.0 - k))
+    return ema
+
+
 def _analyze_single_htf(
     tf_name: str, candles: List[dict], current_price: Optional[float] = None
 ) -> Optional[Dict[str, Any]]:
     """Analiza una sola temporalidad alta (`MN1`, `W1`, `D1` o `H4`). PURO.
 
-    Devuelve sesgo estructural (`ALCISTA`/`BAJISTA`/`NEUTRAL`), etiqueta de estado
-    (`Alcista`, `Retroceso`, `BOS Bajista`, etc.), posición en el Dealing Range
-    (`range_pct` 0-100 y `zone` `PREMIUM`/`DISCOUNT`/`EQUILIBRIUM`), extremos de la
-    vela cerrada anterior (`prev_high`, `prev_low`) y zonas SMC activas (`fvgs`, `obs`).
+    Estructura institucional (P1 - Audit #5):
+    - Swings confirmados (BOS y CHoCH genuinos, no una vela aislada).
+    - Dealing Range institucional (Swing High a Swing Low del tramo activo).
+    - Ubicación en el Dealing Range (Premium >= 55%, Discount <= 45%, Equilibrio).
+    - Contexto de tendencia (EMA 9 + pendiente).
+    - Extremos de la vela cerrada anterior (prev_high, prev_low) y zonas SMC vivas.
     """
     if not candles:
         return None
 
+    n = len(candles)
     last = candles[-1]
-    prev = candles[-2] if len(candles) >= 2 else None
+    prev = candles[-2] if n >= 2 else None
     prev_high = _r6(prev["high"]) if prev is not None else None
     prev_low = _r6(prev["low"]) if prev is not None else None
 
     price = float(current_price) if current_price is not None else float(last["close"])
 
-    # Dealing Range sobre las últimas hasta 3 velas para medir Premium / Discount real
-    ventana = candles[-3:] if len(candles) >= 3 else candles
-    r_low = min(float(c["low"]) for c in ventana)
-    r_high = max(float(c["high"]) for c in ventana)
+    # 1. Swings confirmados y Dealing Range institucional
+    sw_window = 1 if n < 15 else 2
+    hi_idx, lo_idx = swing_pivots(candles, window=sw_window)
+
+    swings_h = [
+        {"price": float(candles[i]["high"]), "idx": i, "time": candles[i]["time"]}
+        for i in hi_idx
+    ]
+    swings_l = [
+        {"price": float(candles[i]["low"]), "idx": i, "time": candles[i]["time"]}
+        for i in lo_idx
+    ]
+
+    # Extremos del Dealing Range
+    if swings_h and swings_l:
+        r_high = max(swings_h[-1]["price"], float(last["high"]))
+        r_low = min(swings_l[-1]["price"], float(last["low"]))
+    else:
+        r_high = max(float(c["high"]) for c in candles)
+        r_low = min(float(c["low"]) for c in candles)
+
     if r_high > r_low:
         raw_pct = (price - r_low) / (r_high - r_low) * 100.0
         range_pct = int(round(max(0.0, min(100.0, raw_pct))))
@@ -356,41 +388,46 @@ def _analyze_single_htf(
         zone = "EQUILIBRIUM"
         zone_es = f"Equilibrio {range_pct}%"
 
-    # Estructura y sesgo de la vela actual respecto a la anterior cerrada
-    last_close = float(last["close"])
-    bull_candle = last_close >= float(last["open"])
-    if prev is not None:
-        above_prev_high = last_close > float(prev["high"])
-        below_prev_low = last_close < float(prev["low"])
-        higher_mid = (float(last["high"]) + float(last["low"])) / 2.0 >= (
-            float(prev["high"]) + float(prev["low"])
-        ) / 2.0
+    # 2. Contexto de tendencia: EMA(9) y pendiente
+    closes = [float(c["close"]) for c in candles]
+    ema_series = _calculate_ema(closes, period=min(9, max(3, n // 2)))
+    last_ema = ema_series[-1] if ema_series else price
+    ema_slope = (ema_series[-1] - ema_series[-3]) if len(ema_series) >= 3 else 0.0
 
-        if above_prev_high:
+    bullish_trend = (price >= last_ema) and (ema_slope >= 0.0)
+    bearish_trend = (price <= last_ema) and (ema_slope <= 0.0)
+
+    # 3. Estructura de mercado: BOS y CHoCH sobre swings reales
+    last_close = float(last["close"])
+    last_sh = swings_h[-1]["price"] if swings_h else None
+    last_sl = swings_l[-1]["price"] if swings_l else None
+
+    hh_hl = (len(swings_h) >= 2 and len(swings_l) >= 2 and
+             swings_h[-1]["price"] > swings_h[-2]["price"] and
+             swings_l[-1]["price"] > swings_l[-2]["price"])
+    lh_ll = (len(swings_h) >= 2 and len(swings_l) >= 2 and
+             swings_h[-1]["price"] < swings_h[-2]["price"] and
+             swings_l[-1]["price"] < swings_l[-2]["price"])
+
+    if last_sh is not None and last_close > last_sh:
+        bias = "ALCISTA"
+        state_label = "CHoCH Alcista" if lh_ll or bearish_trend else "BOS Alcista"
+    elif last_sl is not None and last_close < last_sl:
+        bias = "BAJISTA"
+        state_label = "CHoCH Bajista" if hh_hl or bullish_trend else "BOS Bajista"
+    else:
+        if hh_hl or (bullish_trend and not bearish_trend):
             bias = "ALCISTA"
-            state_label = "BOS Alcista"
-        elif below_prev_low:
+            state_label = "Retroceso a Discount" if zone == "DISCOUNT" else "Alcista"
+        elif lh_ll or (bearish_trend and not bullish_trend):
             bias = "BAJISTA"
-            state_label = "BOS Bajista"
-        elif bull_candle and higher_mid:
-            bias = "ALCISTA"
-            state_label = "Alcista"
-        elif (not bull_candle) and (not higher_mid):
-            bias = "BAJISTA"
-            state_label = "Bajista"
-        elif higher_mid and not bull_candle:
-            bias = "BAJISTA"
-            state_label = "Retroceso"
-        elif (not higher_mid) and bull_candle:
-            bias = "ALCISTA"
-            state_label = "Rebote"
+            state_label = "Retroceso a Premium" if zone == "PREMIUM" else "Bajista"
         else:
+            bull_candle = last_close >= float(last["open"])
             bias = "ALCISTA" if bull_candle else "BAJISTA"
             state_label = "Alcista" if bull_candle else "Bajista"
-    else:
-        bias = "ALCISTA" if bull_candle else "BAJISTA"
-        state_label = "Alcista" if bull_candle else "Bajista"
 
+    # 4. Zonas institucionales vivas
     fvgs = detect_fvgs(candles)
     obs = detect_order_blocks(candles)
 
@@ -428,7 +465,6 @@ def _analyze_single_htf(
             }
 
     if active_poi is None and nearest_zone is not None and (r_high > r_low):
-        # Si está a menos del 15% del rango respecto a la zona, se destaca como activa/cercana
         if best_dist <= (r_high - r_low) * 0.15:
             active_poi = f"{nearest_zone['short_label']} Activo"
 
@@ -437,6 +473,8 @@ def _analyze_single_htf(
         "bias": bias,
         "state_label": state_label,
         "range_pct": range_pct,
+        "range_high": _r6(r_high),
+        "range_low": _r6(r_low),
         "zone": zone,
         "zone_label": zone_es,
         "prev_high": prev_high,
@@ -445,6 +483,8 @@ def _analyze_single_htf(
         "nearest_zone": nearest_zone,
         "fvgs_count": len(fvgs),
         "obs_count": len(obs),
+        "swings_high_count": len(swings_h),
+        "swings_low_count": len(swings_l),
     }
 
 

@@ -61,3 +61,4 @@ La killzone ahora **decide activamente**, filtrando el ruido de sesiones muertas
 - `tests/unit/test_core_purity.py`: 78 tests verificando pureza estricta.
 - `tests/unit/test_smc_engine.py`: 15 tests verificando detección de zonas vivas, descarte de zonas viejas $> 120$ velas y metadatos de calidad.
 - `tests/unit/test_setup_gate.py`: 22 tests verificando que la Killzone aprueba dentro de sesión y rechaza fuera, y que el bonus HTF aprueba/rechaza sincronizado con el veredicto del gate.
+

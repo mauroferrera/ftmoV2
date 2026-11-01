@@ -257,3 +257,42 @@ class TestHtfContextAndConfluence:
         assert 0.5 <= fvgs_200[0]["freshness"] < 1.0
         assert "volume_ratio" in fvgs_200[0]
 
+    def test_analyze_single_htf_swings_confirmados_y_bos(self):
+        """Estructura HTF por swings reales y BOS/CHoCH en vez de una sola vela (P1 - Audit #5)."""
+        # Crear estructura con Swing High claro en 1.1200 y Swing Low en 1.1000
+        velas = [
+            _vela(1, 1.100, 1.105, 1.095, 1.102),
+            _vela(2, 1.102, 1.115, 1.100, 1.112),
+            _vela(3, 1.112, 1.120, 1.110, 1.118),  # Swing High en 1.120
+            _vela(4, 1.118, 1.119, 1.105, 1.108),
+            _vela(5, 1.108, 1.110, 1.098, 1.100),  # Swing Low en 1.098
+            _vela(6, 1.100, 1.108, 1.099, 1.105),
+            _vela(7, 1.105, 1.115, 1.103, 1.112),
+            _vela(8, 1.112, 1.125, 1.110, 1.122),  # Cierre 1.122 > Swing High 1.120 -> BOS Alcista!
+        ]
+        info = smc._analyze_single_htf("D1", velas)
+        assert info is not None
+        assert info["bias"] == "ALCISTA"
+        assert "BOS" in info["state_label"] or "CHoCH" in info["state_label"]
+        assert info["range_high"] >= 1.120
+        assert info["range_low"] <= 1.100
+        assert "swings_high_count" in info
+        assert "swings_low_count" in info
+
+    def test_analyze_single_htf_dealing_range_premium_discount(self):
+        """El Dealing Range abarca los extremos institucionales y calcula zona correctamente."""
+        velas = [
+            _vela(1, 1.100, 1.120, 1.095, 1.110),
+            _vela(2, 1.110, 1.115, 1.105, 1.112),
+            _vela(3, 1.112, 1.118, 1.108, 1.115),
+            _vela(4, 1.115, 1.116, 1.090, 1.095),
+            _vela(5, 1.095, 1.100, 1.092, 1.098),
+        ]
+        # Con precio en 1.096 (cerca del mínimo 1.090 vs máximo 1.120), debe estar en DISCOUNT (<45%)
+        info = smc._analyze_single_htf("D1", velas, current_price=1.096)
+        assert info is not None
+        assert info["zone"] == "DISCOUNT"
+        assert info["range_pct"] <= 45
+        assert "Discount" in info["zone_label"]
+
+
