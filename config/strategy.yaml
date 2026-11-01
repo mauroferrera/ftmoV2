@@ -101,8 +101,8 @@ score:
   # SOLO dos componentes con datos reales (D-002). Un peso > 0 sin feed es
   # puntuación reservada que nunca se devuelve y aplana el score hacia 0.
   weights:
-    smc: 85.0
-    killzone: 15.0
+    smc: 80.0
+    killzone: 20.0
 
 # Ventanas en UTC. Las killzones NO se mueven al horario del broker: el score
 # razona en UTC, que es lo que ve el gráfico y lo que lee el agente.

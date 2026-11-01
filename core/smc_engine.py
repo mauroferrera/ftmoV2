@@ -42,6 +42,40 @@ _ZONE_LABELS = {
 #: swing, es ruido.
 BOS_WINDOW = 5
 
+#: Edad máxima en velas para que una zona SMC viva sea considerada activa (P1 - Audit #6).
+#: 120 velas en M15 = 30 horas de operativa. Zonas más antiguas pierden relevancia institucional.
+MAX_ZONE_AGE_CANDLES = 120
+
+
+def _candle_volume_ratio(candles: List[dict], idx: int, lookback: int = 20) -> float:
+    """Ratio de volumen de la vela vs la media de los lookback periodos previos."""
+    if idx < 0 or idx >= len(candles):
+        return 1.0
+    c = candles[idx]
+    vol = float(c.get("tick_volume") or c.get("volume") or 0.0)
+    if vol <= 0:
+        return 1.0
+    start = max(0, idx - lookback)
+    prev_vols = [
+        float(candles[j].get("tick_volume") or candles[j].get("volume") or 0.0)
+        for j in range(start, idx)
+    ]
+    prev_vols = [v for v in prev_vols if v > 0]
+    if not prev_vols:
+        return 1.0
+    mean_vol = sum(prev_vols) / len(prev_vols)
+    return round(vol / mean_vol, 2)
+
+
+def _zone_freshness(age_candles: int, max_age: int = MAX_ZONE_AGE_CANDLES) -> float:
+    """Frescura continua entre 0.5 (edad límite) y 1.0 (recién formada)."""
+    if age_candles <= 0:
+        return 1.0
+    if max_age <= 0 or age_candles >= max_age:
+        return 0.5
+    return round(1.0 - 0.5 * (age_candles / max_age), 3)
+
+
 
 def _r6(x: float) -> float:
     return round(float(x), 6)
@@ -76,12 +110,13 @@ def _zone_mitigated(candles: List[dict], from_idx: int, top: float, bottom: floa
     return False
 
 
-def detect_fvgs(candles: List[dict]) -> List[dict]:
-    """Fair Value Gaps de 3 velas, solo los VIVOS (no mitigados).
+def detect_fvgs(candles: List[dict], max_age: int = MAX_ZONE_AGE_CANDLES) -> List[dict]:
+    """Fair Value Gaps de 3 velas, solo los VIVOS (no mitigados) y activos por edad.
 
     Un FVG bullish deja un hueco cuando la vela `i` abre por encima del high de
     la vela `i-2` (`cur.low > prev.high`); el hueco es `[prev.high, cur.low]`.
     El bearish es el espejo. El tipo distingue `BULLISH_FVG` de `BEARISH_FVG`.
+    Incluye edad en velas (`age_candles`), frescura continua (`freshness`) y ratio de volumen (`volume_ratio`).
     """
     out: List[dict] = []
     n = len(candles)
@@ -95,11 +130,19 @@ def detect_fvgs(candles: List[dict]) -> List[dict]:
             continue
         if _zone_mitigated(candles, i + 1, top, bottom):
             continue
+        age = (n - 1) - i
+        if max_age and age > max_age:
+            continue
+        vol_ratio = _candle_volume_ratio(candles, i)
+        freshness = _zone_freshness(age, max_age)
         out.append({
             "type": BULLISH_FVG if bullish else BEARISH_FVG,
             "top": _r6(top),
             "bottom": _r6(bottom),
             "start_time": cur["time"],
+            "age_candles": age,
+            "freshness": freshness,
+            "volume_ratio": vol_ratio,
         })
     return out
 
@@ -120,27 +163,36 @@ def _last_opposite_candle(candles: List[dict], before_idx: int, window: int, up:
     return None
 
 
-def _append_active_ob(out, candles, ob_idx, bos_idx, ob_type) -> None:
+def _append_active_ob(out, candles, ob_idx, bos_idx, ob_type, max_age: int = MAX_ZONE_AGE_CANDLES) -> None:
     ob = candles[ob_idx]
     top, bottom = ob["high"], ob["low"]
     # La mitigación se evalúa DESPUÉS de la vela de ruptura del BOS: la propia
     # vela de impulso sale de la zona por definición y no la mitiga.
     if _zone_mitigated(candles, bos_idx + 1, top, bottom):
         return
+    n = len(candles)
+    age = (n - 1) - ob_idx
+    if max_age and age > max_age:
+        return
+    vol_ratio = _candle_volume_ratio(candles, ob_idx)
+    freshness = _zone_freshness(age, max_age)
     out.append({
         "type": ob_type,
         "top": _r6(top),
         "bottom": _r6(bottom),
         "start_time": ob["time"],
+        "age_candles": age,
+        "freshness": freshness,
+        "volume_ratio": vol_ratio,
     })
 
 
-def detect_order_blocks(candles: List[dict]) -> List[dict]:
+def detect_order_blocks(candles: List[dict], max_age: int = MAX_ZONE_AGE_CANDLES) -> List[dict]:
     """Order Blocks: la última vela contraria previa al impulso que rompe estructura.
 
     Solo los VIVOS: se descartan los que cualquier vela posterior haya vuelto a
     penetrar. Un OB es la base desde la que salió el impulso que rompió un swing,
-    y ahí suele quedar liquidez sin ejecutada.
+    y ahí suele quedar liquidez sin ejecutada. Incluye edad, frescura y ratio de volumen.
     """
     out: List[dict] = []
     n = len(candles)
@@ -164,12 +216,12 @@ def detect_order_blocks(candles: List[dict]) -> List[dict]:
         if last_sh and candles[i]["close"] > last_sh[0]:
             ob_idx = _last_opposite_candle(candles, i, BOS_WINDOW, up=True)
             if ob_idx is not None and ob_idx not in seen_obs:
-                _append_active_ob(out, candles, ob_idx, i, BULLISH_OB)
+                _append_active_ob(out, candles, ob_idx, i, BULLISH_OB, max_age=max_age)
                 seen_obs.add(ob_idx)
         elif last_sl and candles[i]["close"] < last_sl[0]:
             ob_idx = _last_opposite_candle(candles, i, BOS_WINDOW, up=False)
             if ob_idx is not None and ob_idx not in seen_obs:
-                _append_active_ob(out, candles, ob_idx, i, BEARISH_OB)
+                _append_active_ob(out, candles, ob_idx, i, BEARISH_OB, max_age=max_age)
                 seen_obs.add(ob_idx)
     return out
 
@@ -474,12 +526,13 @@ def evaluate_htf_confluence(
         # 1. Ubicación Premium / Discount en D1 (o W1 si no hay D1)
         ref_tf = d1 or w1
         if ref_tf:
-            tf_lbl = ref_tf["timeframe"]
-            pct = ref_tf["range_pct"]
-            if is_sell and ref_tf["zone"] == "PREMIUM":
+            tf_lbl = ref_tf.get("timeframe", "D1")
+            pct = ref_tf.get("range_pct", 50.0)
+            z_loc = str(ref_tf.get("zone") or ref_tf.get("location") or "").upper()
+            if is_sell and z_loc == "PREMIUM":
                 bonus += 5.0
                 reasons.append(f"Venta en zona Premium {tf_lbl} ({pct}%)")
-            elif is_buy and ref_tf["zone"] == "DISCOUNT":
+            elif is_buy and z_loc == "DISCOUNT":
                 bonus += 5.0
                 reasons.append(f"Compra en zona Discount {tf_lbl} ({pct}%)")
             elif is_buy and pct >= 78:
@@ -493,22 +546,22 @@ def evaluate_htf_confluence(
         opposite_bias = "BAJISTA" if is_buy else "ALCISTA"
         aligned_tfs: List[str] = []
         against_tfs: List[str] = []
-        if d1 and d1["bias"] == expected_bias:
+        if d1 and d1.get("bias") == expected_bias:
             bonus += 4.0
             aligned_tfs.append("D1")
-        elif d1 and d1["bias"] == opposite_bias:
+        elif d1 and d1.get("bias") == opposite_bias:
             bonus -= 3.0
             against_tfs.append("D1")
-        if w1 and w1["bias"] == expected_bias:
+        if w1 and w1.get("bias") == expected_bias:
             bonus += 4.0
             aligned_tfs.append("W1")
-        elif w1 and w1["bias"] == opposite_bias:
+        elif w1 and w1.get("bias") == opposite_bias:
             bonus -= 3.0
             against_tfs.append("W1")
-        if h4 and h4["bias"] == expected_bias:
+        if h4 and h4.get("bias") == expected_bias:
             bonus += 2.0
             aligned_tfs.append("H4")
-        elif h4 and h4["bias"] == opposite_bias:
+        elif h4 and h4.get("bias") == opposite_bias:
             bonus -= 1.5
             against_tfs.append("H4")
         if aligned_tfs:

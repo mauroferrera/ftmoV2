@@ -233,3 +233,27 @@ class TestHtfContextAndConfluence:
 
         conf_buy = smc.evaluate_htf_confluence(ctx, direction="BUY", current_price=1.1380)
         assert conf_buy["score_bonus"] < 0
+
+    def test_fvg_antiguo_mayor_a_max_age_se_descarta(self):
+        """Zonas creadas hace más de max_age velas se descartan de la operativa viva (P1 - Audit #6)."""
+        # Crear 150 velas donde en vela 2 hay un FVG
+        velas = [
+            _vela(1, 1.10, 1.11, 1.09, 1.10),
+            _vela(2, 1.11, 1.12, 1.10, 1.11),
+            _vela(3, 1.13, 1.14, 1.13, 1.135),  # FVG aquí (edad 150 - 3 = 147 velas)
+        ]
+        # Rellenar con velas por encima para no mitigar el FVG
+        for t in range(4, 151):
+            velas.append(_vela(t, 1.15, 1.16, 1.14, 1.15))
+
+        # Con max_age=120, la FVG tiene edad 147 > 120 -> no debe aparecer
+        fvgs = smc.detect_fvgs(velas, max_age=120)
+        assert len(fvgs) == 0
+
+        # Con max_age=200, sí debe aparecer y reportar su edad y frescura
+        fvgs_200 = smc.detect_fvgs(velas, max_age=200)
+        assert len(fvgs_200) == 1
+        assert fvgs_200[0]["age_candles"] == 147
+        assert 0.5 <= fvgs_200[0]["freshness"] < 1.0
+        assert "volume_ratio" in fvgs_200[0]
+

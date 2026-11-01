@@ -187,3 +187,77 @@ class TestEvaluateGate:
         assert plan["approved"] is False
         assert any("conflicto" in r.lower() for r in plan["reasons"])
 
+    def test_killzone_decide_con_peso_real_dentro_vs_fuera(self):
+        """Con pesos 80/20 y umbral 59.5, la killzone DECIDE activamente (P1 - Audit #3)."""
+        cfg = dict(CFG, min_score=59.5)
+        # 1. Dentro de Londres (08:00 UTC) -> SMC 0.70 * 80 + KZ 1.0 * 20 = 76.0 -> Aprobado
+        dentro = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)
+        snap_in = _snapshot(direccion="BUY", price=1.1010, now=dentro)
+        # Forzar un patrón con SMC = 0.7 (FVG + OB)
+        pat_70 = {
+            "fvgs": [{"type": "BULLISH_FVG", "bottom": 1.1000, "top": 1.1005, "freshness": 0.75}],
+            "order_blocks": [{"type": "BULLISH_OB", "bottom": 1.0990, "top": 1.0995, "freshness": 0.75}],
+            "sweeps": [],
+        }
+        re_in = risk_engine.score_directions(pat_70, {"smc": 80, "killzone": 20}, risk_engine.DEFAULT_KILLZONES, dentro)
+        snap_in["risk_engine"] = re_in
+        snap_in["analysis"]["patterns"] = pat_70
+        plan_in = setup_gate.evaluate_gate(snap_in, cfg)
+        assert plan_in["score"] == 76.0
+        assert plan_in["approved"] is True
+
+        # 2. Fuera de Killzone (03:00 UTC) -> SMC 0.70 * 80 + KZ 0.0 * 20 = 56.0 -> Rechazado (< 59.5)
+        fuera = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)
+        snap_out = _snapshot(direccion="BUY", price=1.1010, now=fuera)
+        re_out = risk_engine.score_directions(pat_70, {"smc": 80, "killzone": 20}, risk_engine.DEFAULT_KILLZONES, fuera)
+        snap_out["risk_engine"] = re_out
+        snap_out["analysis"]["patterns"] = pat_70
+        plan_out = setup_gate.evaluate_gate(snap_out, cfg)
+        assert plan_out["score"] == 56.0
+        assert plan_out["approved"] is False
+        assert any("Score 56.0 < umbral 60" in r for r in plan_out["reasons"])
+
+    def test_confluencia_htf_unificada_aprueba_con_bonus(self):
+        """El bonus HTF se suma al score evaluado por el gate (P1 - Audit #4)."""
+        cfg = dict(CFG, min_score=60.0)
+        snap = _snapshot(direccion="BUY", price=1.1010)
+        # Forzar base_score = 56.0
+        snap["risk_engine"]["bull"]["score"] = 56.0
+        # Simular htf_context con bonus de +10
+        snap["analysis"]["htf_context"] = {
+            "timeframes": {
+                "D1": {"bias": "ALCISTA", "location": "Discount"},
+                "H4": {"bias": "ALCISTA", "location": "Discount"},
+            },
+            "liquidity_magnet": {"label": "PDH", "price": 1.1050},
+        }
+        plan = setup_gate.evaluate_gate(snap, cfg)
+        # Score efectivo = 56.0 + 11.0 = 67.0 >= 60.0 -> Aprobado!
+        assert plan["base_score"] == 56.0
+        assert plan["htf_score_bonus"] == 11.0
+        assert plan["score"] == 67.0
+        assert plan["approved"] is True
+
+    def test_confluencia_htf_unificada_rechaza_con_penalizacion(self):
+        """La penalización HTF reduce el score del gate y puede rechazar (P1 - Audit #4)."""
+        cfg = dict(CFG, min_score=60.0)
+        snap = _snapshot(direccion="BUY", price=1.1010)
+        # Forzar base_score = 64.0 (que pasaría solo)
+        snap["risk_engine"]["bull"]["score"] = 64.0
+        # Simular htf_context en contra (bias bajista en Premium) -> penalización -4.5 pts
+        snap["analysis"]["htf_context"] = {
+            "timeframes": {
+                "D1": {"bias": "BAJISTA", "location": "Premium"},
+                "H4": {"bias": "BAJISTA", "location": "Premium"},
+            },
+            "liquidity_magnet": {"label": "PDL", "price": 1.0950},
+        }
+        plan = setup_gate.evaluate_gate(snap, cfg)
+        # Score efectivo = 64.0 - 4.5 = 59.5 < 60.0 -> Rechazado!
+        assert plan["base_score"] == 64.0
+        assert plan["htf_score_bonus"] == -4.5
+        assert plan["score"] == 59.5
+        assert plan["approved"] is False
+        assert any("Score 59.5 (base 64.0 + HTF -4.5) < umbral 60" in r for r in plan["reasons"])
+
+

@@ -388,13 +388,17 @@ class MarketService:
             momento = setup_gate.killzone_forced_now(killzones, now)
             forced = momento is not None
 
+        atr_val = (datos.get("analysis") or {}).get("atr_14")
         return {
             "symbol": s,
             "timeframe": tf,
             "current_price": precio,
             "last_time": last_time,
             "analysis": datos.get("analysis") or {},
-            "risk_engine": risk_engine.score_directions(patterns, weights, killzones, momento),
+            "risk_engine": risk_engine.score_directions(
+                patterns, weights, killzones, momento,
+                current_price=precio, atr=atr_val
+            ),
             "killzone_forced": forced,
         }
 

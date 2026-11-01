@@ -166,21 +166,23 @@ def evaluate(snapshot: Dict[str, Any],
         "created_at": last_time,
     }
 
-    # Confluencia de altas temporalidades (HTF: MN1, W1, D1, H4)
-    htf_ctx = (snap.get("analysis") or {}).get("htf_context")
-    if isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
-        htf_conf = smc_engine.evaluate_htf_confluence(
-            htf_ctx, direction=direction, current_price=gate["current_price"]
-        )
-        base_score = float(gate["score"] or 0.0)
-        bonus = float(htf_conf.get("score_bonus") or 0.0)
-        score_with_htf = round(min(100.0, max(0.0, base_score + bonus)), 1)
-        ret["base_score"] = base_score
-        ret["htf_score_bonus"] = bonus
-        ret["score_with_htf"] = score_with_htf
-        ret["htf_confluence"] = htf_conf
-        if min_score is None:
-            ret["score"] = score_with_htf
+    # Confluencia de altas temporalidades unificada con el gate (HTF: MN1, W1, D1, H4)
+    if "base_score" in gate:
+        ret["base_score"] = gate["base_score"]
+        ret["htf_score_bonus"] = gate.get("htf_score_bonus", 0.0)
+        ret["score_with_htf"] = gate["score"]
+        ret["htf_confluence"] = gate.get("htf_confluence")
+    else:
+        htf_ctx = (snap.get("analysis") or {}).get("htf_context")
+        if isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
+            htf_conf = smc_engine.evaluate_htf_confluence(
+                htf_ctx, direction=direction, current_price=gate["current_price"]
+            )
+            bonus = float(htf_conf.get("score_bonus") or 0.0)
+            ret["base_score"] = float(gate["score"] or 0.0)
+            ret["htf_score_bonus"] = bonus
+            ret["score_with_htf"] = gate["score"]
+            ret["htf_confluence"] = htf_conf
 
     if str(gate.get("symbol") or "").upper() == "EURUSD":
         try:

@@ -31,8 +31,8 @@ from typing import Any, Dict, List, Optional
 # aparte —darle puntos Y exigirla como AND duro contaría la misma variable dos
 # veces— y por eso `core/setup_gate.py` no la vuelve a exigir.
 DEFAULT_WEIGHTS: Dict[str, float] = {
-    "smc": 85.0,
-    "killzone": 15.0,
+    "smc": 80.0,
+    "killzone": 20.0,
 }
 
 DEFAULT_GRADE_THRESHOLDS: Dict[str, float] = {
@@ -103,10 +103,10 @@ def killzone_score(windows: Optional[List[Dict[str, str]]] = None,
                 "detail": f"Dentro de la ventana {w.get('name') or 'killzone'} (UTC).",
             }
     return {
-        "value": 0.25,
+        "value": 0.0,
         "in_killzone": False,
         "name": None,
-        "detail": "Fuera de killzone (UTC): el componente puntúa parcial.",
+        "detail": "Fuera de killzone (UTC): sin sesión activa (0 pts).",
     }
 
 
@@ -134,29 +134,90 @@ def _bull_keys(patterns: Dict[str, Any], direction: str) -> Dict[str, Any]:
             "sweep_key": sweep_key}
 
 
-def smc_component(patterns: Optional[Dict[str, Any]], direction: str) -> Dict[str, Any]:
-    """Confluencia SMC: FVG + Order Block + Liquidity Sweep a favor de la dirección."""
+def smc_component(patterns: Optional[Dict[str, Any]], direction: str,
+                  current_price: Optional[float] = None,
+                  atr: Optional[float] = None) -> Dict[str, Any]:
+    """Confluencia SMC continua con calidad y frescura de zonas (P1 - Audit #3, #6).
+
+    Evalúa:
+    1. Base estructural: FVG, Order Block y Liquidity Sweep a favor.
+    2. Frescura continua: promedio de frescura de las zonas vivas (penaliza zonas viejas).
+    3. Confirmación de volumen: desplazamiento institucional (volume_ratio >= 1.3).
+    4. Proximidad en ATR: evalúa si la zona favorable más cercana está al alcance (< 2 ATR).
+    5. Contrapartida estructural: penalización proporcional por zonas contrarias vivas.
+    """
     pat = patterns or {}
     if not any(k in pat for k in ("fvgs", "order_blocks", "sweeps")):
         return {"value": 0.0, "detail": "Sin estructura SMC."}
 
     k = _bull_keys(pat, direction)
+    fav_zones = k["fvgs"] + k["obs"]
     has_fvg, has_ob, has_sweep = bool(k["fvgs"]), bool(k["obs"]), bool(k["sweeps"])
-    if has_fvg and has_ob and has_sweep:
-        value, why = 1.0, "FVG + OB + Sweep a favor"
-    elif has_fvg and (has_ob or has_sweep):
-        value, why = 0.7, ("FVG + " + ("OB" if has_ob else "Sweep") + " a favor")
-    elif has_fvg or has_ob or has_sweep:
-        value, why = 0.5, ("OB" if has_ob else ("FVG" if has_fvg else str(k["sweep_key"]))) + " a favor"
-    else:
-        value, why = 0.15, "Sin confluencia a favor"
 
-    if has_sweep and k["opposed"] > 0:
-        value = max(0.0, value - 0.1)
+    if has_fvg and has_ob and has_sweep:
+        base, why = 1.0, "FVG + OB + Sweep a favor"
+    elif has_fvg and (has_ob or has_sweep):
+        base, why = 0.70, ("FVG + " + ("OB" if has_ob else "Sweep") + " a favor")
+    elif has_fvg or has_ob or has_sweep:
+        base, why = 0.50, ("OB" if has_ob else ("FVG" if has_fvg else str(k["sweep_key"]))) + " a favor"
+    else:
+        base, why = 0.15, "Sin confluencia a favor"
+
+    mod = 0.0
+    detalles_calidad = []
+
+    # 1. Frescura de zonas a favor
+    if fav_zones:
+        fresh_vals = [float(z["freshness"]) for z in fav_zones if "freshness" in z]
+        if fresh_vals:
+            avg_freshness = sum(fresh_vals) / len(fresh_vals)
+            # Freshness va de 0.5 a 1.0; centrado en 0.75 da entre -0.05 y +0.05
+            fresh_adj = round((avg_freshness - 0.75) * 0.2, 3)
+            mod += fresh_adj
+            if abs(fresh_adj) >= 0.02:
+                detalles_calidad.append(f"frescura: {fresh_adj:+.2f}")
+
+    # 2. Confirmación de volumen relativo institucional
+    high_vol = any(float(z.get("volume_ratio", 1.0)) >= 1.3 for z in fav_zones)
+    if high_vol:
+        mod += 0.05
+        detalles_calidad.append("volumen inst.: +0.05")
+
+    # 3. Proximidad al precio en múltiplos de ATR
+    if current_price is not None and atr is not None and atr > 0 and fav_zones:
+        cp = float(current_price)
+        dist_min = None
+        for z in fav_zones:
+            top = float(z.get("top", 0.0))
+            bot = float(z.get("bottom", 0.0))
+            if bot <= cp <= top:
+                dist = 0.0
+            else:
+                dist = min(abs(cp - bot), abs(cp - top))
+            if dist_min is None or dist < dist_min:
+                dist_min = dist
+
+        if dist_min is not None:
+            dist_atr = dist_min / atr
+            if dist_atr > 2.0:
+                mod -= 0.05
+                detalles_calidad.append("zona lejana: -0.05")
+
+    # 4. Contrapartida estructural
+    if k["opposed"] > 0:
+        opp_pen = round(min(0.10, k["opposed"] * 0.05), 2)
+        mod -= opp_pen
+        detalles_calidad.append(f"contrapartida: -{opp_pen:.2f}")
+
+    final_val = round(min(1.0, max(0.05, base + mod)), 2)
+    detail_str = why
+    if detalles_calidad:
+        detail_str += f" ({', '.join(detalles_calidad)})"
+    detail_str += f" (contrapartida estructural: {k['opposed']})."
 
     return {
-        "value": round(value, 2),
-        "detail": why + f" (contrapartida estructural: {k['opposed']}).",
+        "value": final_val,
+        "detail": detail_str,
     }
 
 
@@ -211,8 +272,10 @@ def setup_score(inputs: Dict[str, Any],
     """Setup Score 0-100 con breakdown de los componentes.
 
     inputs:
-      direction  ("BUY"/"SELL")
-      patterns   {"fvgs","order_blocks","sweeps",...} o None
+      direction      ("BUY"/"SELL")
+      patterns       {"fvgs","order_blocks","sweeps",...} o None
+      current_price  float opcional
+      atr            float opcional
     weights: {"smc","killzone"} en puntos; si no suman 100 se normalizan al total.
     """
     w = _resolve_weights(weights)
@@ -220,7 +283,12 @@ def setup_score(inputs: Dict[str, Any],
 
     direction = str(inputs.get("direction") or "BUY").upper()
     kz = killzone_score(killzones, now)
-    smc = smc_component(inputs.get("patterns"), direction)
+    smc = smc_component(
+        inputs.get("patterns"),
+        direction,
+        current_price=inputs.get("current_price"),
+        atr=inputs.get("atr"),
+    )
 
     comps = {
         "smc": {**smc, "weight": w.get("smc", 0.0)},
@@ -242,7 +310,9 @@ def setup_score(inputs: Dict[str, Any],
 def score_directions(patterns: Optional[Dict[str, Any]],
                      weights: Optional[Dict[str, float]] = None,
                      killzones: Optional[List[Dict[str, str]]] = None,
-                     now: Optional[datetime] = None) -> Dict[str, Any]:
+                     now: Optional[datetime] = None,
+                     current_price: Optional[float] = None,
+                     atr: Optional[float] = None) -> Dict[str, Any]:
     """El bloque `risk_engine` de un snapshot: score de BUY y SELL + invalidez.
 
     Devuelve `{"bull": {...}, "bear": {...}, "invalidation": {"BUY","SELL"}}`, que
@@ -253,7 +323,13 @@ def score_directions(patterns: Optional[Dict[str, Any]],
     salida: Dict[str, Any] = {}
     for lado, direccion in (("bull", "BUY"), ("bear", "SELL")):
         salida[lado] = setup_score(
-            {"direction": direccion, "patterns": patterns}, weights, killzones, now
+            {
+                "direction": direccion,
+                "patterns": patterns,
+                "current_price": current_price,
+                "atr": atr,
+            },
+            weights, killzones, now
         )
     salida["invalidation"] = {
         "BUY": invalidation_level(patterns, "BUY"),

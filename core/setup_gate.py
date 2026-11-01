@@ -37,7 +37,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from core import indicators, risk_engine, strategy
+from core import indicators, risk_engine, smc_engine, strategy
 
 #: R:R por defecto cuando la config no declara `tp_ratio_r`. Es el 2.0 de REF: con un
 #: valor accidentalmente nulo el TP caería en la propia entrada y el "plan" sería una
@@ -272,8 +272,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     )
 
     direction, mejor = max(lados, key=lambda par: float((par[1] or {}).get("score") or 0.0))
-    score = float((mejor or {}).get("score") or 0.0)
-    verdict = str((mejor or {}).get("verdict") or "")
+    base_score = float((mejor or {}).get("score") or 0.0)
     components = (mejor or {}).get("components") or {}
     killzone = components.get("killzone") or {}
     in_killzone = bool(killzone.get("in_killzone"))
@@ -286,7 +285,25 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
 
     symbol = str(snapshot.get("symbol") or "").upper()
     price = _num(snapshot.get("current_price"))
-    patterns = ((snapshot.get("analysis") or {}).get("patterns")) or {}
+    analysis = snapshot.get("analysis") or {}
+    patterns = (analysis.get("patterns")) or {}
+
+    # Unificación de confluencia HTF dentro del gate de aprobación (P1 - Audit #4)
+    htf_ctx = analysis.get("htf_context")
+    htf_bonus = 0.0
+    htf_conf = None
+    if isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
+        try:
+            htf_conf = smc_engine.evaluate_htf_confluence(
+                htf_ctx, direction=direction, current_price=price
+            )
+            htf_bonus = float(htf_conf.get("score_bonus") or 0.0)
+        except Exception:  # noqa: BLE001
+            htf_conf = None
+            htf_bonus = 0.0
+
+    score_effective = round(min(100.0, max(0.0, base_score + htf_bonus)), 1)
+    verdict = risk_engine.grade_score(score_effective)
 
     sl_dist, sl_origin = strategy.sl_distance_for(cfg, symbol or None, spec)
     tp_ratio = strategy.tp_ratio_for(cfg)
@@ -309,7 +326,6 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     digits = _spec_attr(spec, "digits", 6)
     point = _spec_attr(spec, "point", 0.00001)
 
-    analysis = snapshot.get("analysis") or {}
     atr_val = _num(analysis.get("atr_14")) or _num(snapshot.get("atr_14")) or 0.0
     spread_val = _num(snapshot.get("spread_price")) or 0.0
     target_magnet = _num(((analysis.get("htf_context") or {}).get("liquidity_magnet") or {}).get("price"))
@@ -350,7 +366,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
                       "reasons": ["risk_engine: {0}".format(exc)]}
 
     approved = bool(
-        score >= umbral
+        score_effective >= umbral
         and sl_dist is not None
         and sl is not None
         and not zone_too_far
@@ -359,9 +375,14 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     )
 
     reasons: List[str] = []
-    if score < umbral:
-        reasons.append(
-            "Score {0:.1f} < umbral {1:.0f}.".format(score, umbral))
+    if score_effective < umbral:
+        if htf_bonus != 0.0:
+            reasons.append(
+                f"Score {score_effective:.1f} (base {base_score:.1f} + HTF {htf_bonus:+.1f}) < umbral {umbral:.0f}."
+            )
+        else:
+            reasons.append(
+                "Score {0:.1f} < umbral {1:.0f}.".format(score_effective, umbral))
     if scores_empatados:
         reasons.append(
             "Conflicto direccional: BUY y SELL empatan en score ({0:.1f}).".format(score_buy))
@@ -378,7 +399,10 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     return {
         "symbol": symbol,
         "direction": direction,
-        "score": round(score, 2),
+        "score": score_effective,
+        "base_score": base_score,
+        "htf_score_bonus": htf_bonus,
+        "htf_confluence": htf_conf,
         "verdict": verdict,
         "min_score_used": umbral,
         "killzone": {"in_killzone": in_killzone, "name": killzone_name},

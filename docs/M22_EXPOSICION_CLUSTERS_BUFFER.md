@@ -70,3 +70,4 @@ Ninguna operación individual puede arriesgar más del 50% del buffer restante d
 3. **Servicio de Ejecución (`test_execution_service.py`):** 117 tests verificando:
    - Protección infranqueable con `force=True`.
    - Reducción real de lotes en órdenes enviadas al broker.
+
