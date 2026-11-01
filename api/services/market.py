@@ -395,6 +395,9 @@ class MarketService:
             "current_price": precio,
             "last_time": last_time,
             "analysis": datos.get("analysis") or {},
+            # El spread en precio (no en puntos): es lo que necesita el buffer
+            # ATR del stop. Sin esta clave el colchón `2 × spread` era siempre 0.
+            "spread_price": self.spread_price(s),
             "risk_engine": risk_engine.score_directions(
                 patterns, weights, killzones, momento,
                 current_price=precio, atr=atr_val
@@ -434,6 +437,19 @@ class MarketService:
         if bid is None or ask is None:
             return None
         return round((float(ask) - float(bid)) / float(point), 1)
+
+    def spread_price(self, symbol: str) -> Optional[float]:
+        """El spread en UNIDADES DE PRECIO (puntos × `point`), o `None`.
+
+        Lo consume `core.setup_gate` para el colchón del stop (`2 × spread`).
+        Sin esto, el término del spread del buffer SMC valía siempre 0: el gate
+        leía `snapshot["spread_price"]`, una clave que este servicio no publicaba.
+        """
+        puntos = self.spread_points(symbol)
+        point = self.point(symbol)
+        if puntos is None or not point:
+            return None
+        return round(float(puntos) * float(point), 8)
 
     # -- símbolos -----------------------------------------------------------------
 

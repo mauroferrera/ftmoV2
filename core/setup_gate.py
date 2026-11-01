@@ -95,6 +95,15 @@ def max_zone_span(cfg: Optional[Dict[str, Any]] = None,
     return float(ENTRY_ZONE_MAX_SPAN)
 
 
+#: Origen de la distancia de SL (`structural_sl_and_tp`) -> etiqueta que ve la UI.
+#: `None` (sin plan estructural, p. ej. sin `sl_dist`) cae al origen de la config.
+_SL_SOURCE_LABELS = {
+    "structure": "structural_atr",
+    "atr": "atr_volatility",
+    "config": "config_sl_min",
+}
+
+
 def _zonas(patterns: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Las FVG y OB vivas del snapshot, como cajas `{bottom, top, kind}`."""
     pat = patterns or {}
@@ -328,7 +337,17 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
 
     atr_val = _num(analysis.get("atr_14")) or _num(snapshot.get("atr_14")) or 0.0
     spread_val = _num(snapshot.get("spread_price")) or 0.0
-    target_magnet = _num(((analysis.get("htf_context") or {}).get("liquidity_magnet") or {}).get("price"))
+    # Imán de liquidez (M25): el nivel que publica `evaluate_htf_confluence` es
+    # `next_liquidity`. Antes se buscaba `liquidity_magnet`, una clave que el
+    # motor NO produce, así que el TP al imán solo existía en los tests.
+    target_magnet = _num(
+        ((analysis.get("htf_context") or {}).get("liquidity_magnet") or {}).get("price"))
+    if target_magnet is None and isinstance(htf_conf, dict):
+        target_magnet = _num((htf_conf.get("next_liquidity") or {}).get("price"))
+
+    atr_min_mult = _num(cfg.get("structural_atr_min_mult")) if isinstance(cfg, dict) else None
+    if atr_min_mult is None:
+        atr_min_mult = float(strategy.DEFAULTS.get("structural_atr_min_mult", 1.0))
 
     distal_level = invalidation if elegida else None
     if sl_dist is None:
@@ -349,6 +368,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
             tp_ratio=tp_ratio or DEFAULT_TP_RATIO,
             target_magnet=target_magnet,
             digits=digits,
+            atr_min_mult=atr_min_mult,
         )
         sl = struct_levels["sl"]
         tp = struct_levels["tp"]
@@ -360,6 +380,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         validation = risk_engine.validate_entry(
             entry=entry, sl=sl, target=tp, direction=direction,
             current_price=price, invalidate_level=invalidation, cfg=cfg,
+            tick_size=point,
         )
     except Exception as exc:  # noqa: BLE001 - un fallo del motor es un rechazo, no un 500
         validation = {"approved": False, "rejected": True,
@@ -414,7 +435,8 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         "sl": sl,
         "tp": tp,
         "sl_distance": effective_sl_dist,
-        "sl_distance_source": "structural_atr" if struct_levels["is_structural"] else sl_origin,
+        "sl_distance_source": _SL_SOURCE_LABELS.get(
+            struct_levels.get("dist_source") or "", sl_origin),
         "tp_ratio_r": tp_ratio if tp_ratio is not None else DEFAULT_TP_RATIO,
         "invalidate_level": invalidation,
         "unit_label": str(_spec_attr(spec, "unit_label", "") or ""),
@@ -422,6 +444,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         "reasons": reasons,
         "is_structural_sl": struct_levels["is_structural"],
         "atr_14": atr_val,
+        "atr_floor": struct_levels.get("atr_floor"),
         "magnet_applied": struct_levels["magnet_applied"],
     }
 

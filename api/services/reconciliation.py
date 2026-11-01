@@ -74,16 +74,22 @@ class ReconciliationService:
         except Exception as exc:
             log.warning("No se pudo listar setup_log: %s", exc)
 
-        # Indexar setups por order ticket si existe en trade_result_json
+        # Indexar setups por TICKET DE POSICIÓN. `trade_result_json["order"]` es
+        # el ticket de la ORDER de MT5, que NO es el `position_id` del deal: en
+        # una cuenta hedging son números distintos, y emparejar por `order`
+        # dejaba posiciones sin setup (M20). `order` queda como reserva para las
+        # filas escritas antes de que existiera `position_ticket`.
         setup_by_order: Dict[int, Dict[str, Any]] = {}
         for s in recent_setups:
             tr = s.get("trade_result_json") or {}
-            order_num = tr.get("order")
-            if order_num:
+            for clave in ("position_ticket", "order"):
+                ident = tr.get(clave)
+                if not ident:
+                    continue
                 try:
-                    setup_by_order[int(order_num)] = s
+                    setup_by_order.setdefault(int(ident), s)
                 except (ValueError, TypeError):
-                    pass
+                    continue
 
         marks_saved = 0
         reconciled_positions = 0
@@ -140,7 +146,7 @@ class ReconciliationService:
             score = float(setup.get("score") or 0.0) if setup else None
             source = str(setup.get("source") or "reconciled") if setup else "broker_deal"
 
-            # 5. Intentar obtener estado de posición para SL / R original si existe
+            # 5. Estado de la posición: de ahí sale la DISTANCIA DE RIESGO original
             pos_state = None
             try:
                 fn_pos_state = getattr(self._store, "get_position_state", None)
@@ -149,19 +155,28 @@ class ReconciliationService:
             except Exception:
                 pass
 
-            if not initial_sl and pos_state:
-                # Si position_state tenía r_original o be_level
-                be_level = pos_state.get("be_level")
-                if be_level:
-                    initial_sl = float(be_level)
+            # El R se mide contra la distancia de riesgo de la APERTURA, no
+            # contra el stop actual: en cuanto el SL se mueve a break-even,
+            # `|entrada - SL actual|` es ~0 y el R se dispara. `r_original` de
+            # `position_state` es la fuente; el `sl` del setup, la reserva.
+            # `be_level` NO sirve para esto: es el stop de HOY, no el riesgo.
+            risk_dist: Optional[float] = None
+            try:
+                r_original = (pos_state or {}).get("r_original")
+                if r_original is not None and abs(float(r_original)) > 1e-9:
+                    risk_dist = abs(float(r_original))
+            except (TypeError, ValueError):
+                risk_dist = None
+            if risk_dist is None and initial_sl > 0 and price_open > 0:
+                medida = abs(price_open - initial_sl)
+                risk_dist = medida if medida > 1e-6 else None
 
-            # 6. Cálculo de R-múltiplo realizado
+            # 6. Cálculo de R-múltiplo realizado (`None` si no se puede medir)
             r_multiple = self._calc_r_multiple(
                 direction=direction,
                 price_open=price_open,
                 price_close=price_close,
-                initial_sl=initial_sl,
-                net_profit=net_profit,
+                risk_dist=risk_dist,
             )
 
             # 7. Clasificación de Calidad de Salida (exit_quality)
@@ -181,12 +196,17 @@ class ReconciliationService:
                 symbol=symbol,
                 direction=direction,
                 price_open=price_open,
-                initial_sl=initial_sl,
+                risk_dist=risk_dist,
                 time_open=time_open,
                 time_close=time_close,
             )
 
             # 9. Construir outcome_json y context_json
+            # Una posición con salida PARCIAL sigue viva en el bróker: la marca
+            # se guarda igual (es una decisión ya ejecutada), pero se publica
+            # `is_open` para que el análisis de rendimiento no cuente como
+            # cerrada una operación que aún puede girar.
+            is_open = in_volume > 0 and total_out_vol < in_volume * 0.99
             outcome_json = {
                 "net_profit": net_profit,
                 "profit_raw": round(total_profit_raw, 2),
@@ -198,7 +218,9 @@ class ReconciliationService:
                 "exit_type": exit_quality,
                 "mae_r": mae_r,
                 "mfe_r": mfe_r,
-                "is_full_close": in_volume <= 0 or (total_out_vol >= in_volume * 0.99),
+                "is_open": is_open,
+                "is_full_close": not is_open,
+                "risk_dist": round(risk_dist, 5) if risk_dist else None,
             }
 
             score_bucket = self._bucket_score(score) if score is not None else "no_score"
@@ -295,55 +317,57 @@ class ReconciliationService:
         direction: str,
         price_open: float,
         price_close: float,
-        initial_sl: float,
-        net_profit: float,
-    ) -> float:
-        """Calcula el R-múltiplo obtenido."""
-        if initial_sl > 0 and price_open > 0:
-            risk_dist = abs(price_open - initial_sl)
-            if risk_dist > 1e-6:
-                if direction.upper() == "BUY":
-                    return round((price_close - price_open) / risk_dist, 2)
-                else:
-                    return round((price_open - price_close) / risk_dist, 2)
+        risk_dist: Optional[float],
+    ) -> Optional[float]:
+        """El R realizado, o `None` si no se puede medir.
 
-        # Si no hay distancia de stop pero hay profit y asumimos un riesgo base de 0.5% ($125 en 25k)
-        if net_profit != 0:
-            # Aproximación conservadora si no hubo SL registrado
-            return round(net_profit / 125.0, 2)
-
-        return 0.0
+        Sin la distancia de riesgo de la apertura no hay R que calcular. Antes
+        se devolvía `net_profit / 125.0`, que es el riesgo nominal de una cuenta
+        de 25k al 0.5% —el de OTRA operación— y convertía cualquier PnL en un R
+        inventado. Un `None` en la auditoría es un dato que falta; un número
+        inventado es un dato falso.
+        """
+        if not risk_dist or float(risk_dist) <= 1e-9 or price_open <= 0:
+            return None
+        rd = float(risk_dist)
+        if direction.upper() == "BUY":
+            return round((price_close - price_open) / rd, 2)
+        return round((price_open - price_close) / rd, 2)
 
     def _classify_exit_quality(
         self,
         exit_reason: int,
         net_profit: float,
-        r_multiple: float,
+        r_multiple: Optional[float],
         price_open: float,
         price_close: float,
         initial_sl: float,
         initial_tp: float,
         direction: str,
     ) -> str:
-        """Clasifica la calidad/tipo de salida para auditoría."""
+        """Clasifica la calidad/tipo de salida para auditoría.
+
+        El break-even se decide por R (`|R| <= 0.15`), no por un umbral en
+        dólares: `|PnL| <= $5` no significa lo mismo en EURUSD que en XAUUSD
+        con 0.5 lotes. Sin R medible se clasifica por el motivo del deal, que
+        es el dato que el bróker sí da.
+        """
+        be = r_multiple is not None and abs(float(r_multiple)) <= 0.15
         if exit_reason == DEAL_REASON_SL:
-            # Verificar si fue un Stop Loss normal o un Break-Even
-            if abs(r_multiple) <= 0.15 or abs(net_profit) <= 5.0:
-                return "BE"
-            return "SL"
+            return "BE" if be else "SL"
         elif exit_reason == DEAL_REASON_TP:
             return "TP"
         elif exit_reason == DEAL_REASON_SO:
             return "STOP_OUT"
         elif exit_reason in (DEAL_REASON_CLIENT, DEAL_REASON_MOBILE, DEAL_REASON_WEB):
-            if abs(r_multiple) <= 0.15 or abs(net_profit) <= 5.0:
+            if be:
                 return "MANUAL_BE"
             return "MANUAL_WIN" if net_profit > 0 else "MANUAL_LOSS"
         elif exit_reason == DEAL_REASON_EXPERT:
-            if abs(r_multiple) <= 0.15 or abs(net_profit) <= 5.0:
+            if be:
                 return "BE"
-            if r_multiple >= 0.8:
-                return "TP_PARTIAL" if r_multiple < 1.8 else "TP"
+            if r_multiple is not None and float(r_multiple) >= 0.8:
+                return "TP_PARTIAL" if float(r_multiple) < 1.8 else "TP"
             return "MANAGEMENT"
 
         # Fallback genérico
@@ -358,16 +382,16 @@ class ReconciliationService:
         symbol: str,
         direction: str,
         price_open: float,
-        initial_sl: float,
+        risk_dist: Optional[float],
         time_open: Optional[int],
         time_close: Optional[int],
     ) -> Tuple[Optional[float], Optional[float]]:
         """Calcula MAE y MFE en unidades de R a partir de las velas del trade."""
-        if not time_open or not time_close or initial_sl <= 0 or price_open <= 0:
+        if not time_open or not time_close or not risk_dist or price_open <= 0:
             return None, None
 
-        risk_dist = abs(price_open - initial_sl)
-        if risk_dist <= 1e-6:
+        rd = abs(float(risk_dist))
+        if rd <= 1e-9:
             return None, None
 
         # Intentar obtener velas de mercado para el trade
@@ -399,7 +423,7 @@ class ReconciliationService:
                 mae_dist = max(0.0, max_high - price_open)
                 mfe_dist = max(0.0, price_open - min_low)
 
-            return round(mae_dist / risk_dist, 2), round(mfe_dist / risk_dist, 2)
+            return round(mae_dist / rd, 2), round(mfe_dist / rd, 2)
         except Exception:
             return None, None
 
@@ -426,6 +450,14 @@ class ReconciliationService:
         except Exception as exc:
             log.warning("Error al listar trade_marks: %s", exc)
             marks = []
+
+        # Una marca con `is_open` es una salida PARCIAL de una posición que
+        # sigue viva: contarla como trade cerrado inflaba el winrate con
+        # operaciones que aún pueden girar.
+        open_marks = [m for m in marks
+                      if (m.get("outcome_json") or {}).get("is_open")]
+        marks = [m for m in marks
+                 if not (m.get("outcome_json") or {}).get("is_open")]
 
         total_trades = len(marks)
         wins = [m for m in marks if float(m.get("profit") or 0.0) > 0]
@@ -476,11 +508,14 @@ class ReconciliationService:
                 buckets_map[b_key] = {"trades": 0, "wins": 0, "losses": 0, "profit": 0.0, "r_sum": 0.0}
 
             pnl = float(m.get("profit") or 0.0)
-            r_val = float(m.get("r_multiple") or 0.0)
+            r_raw = m.get("r_multiple")
+            r_val = float(r_raw) if r_raw is not None else None
 
             buckets_map[b_key]["trades"] += 1
             buckets_map[b_key]["profit"] += pnl
-            buckets_map[b_key]["r_sum"] += r_val
+            if r_val is not None:
+                buckets_map[b_key]["r_sum"] += r_val
+                buckets_map[b_key]["r_n"] = buckets_map[b_key].get("r_n", 0) + 1
             if pnl > 0:
                 buckets_map[b_key]["wins"] += 1
             elif pnl < 0:
@@ -492,7 +527,9 @@ class ReconciliationService:
                 by_symbol[sym] = {"trades": 0, "wins": 0, "losses": 0, "profit": 0.0, "r_sum": 0.0}
             by_symbol[sym]["trades"] += 1
             by_symbol[sym]["profit"] += pnl
-            by_symbol[sym]["r_sum"] += r_val
+            if r_val is not None:
+                by_symbol[sym]["r_sum"] += r_val
+                by_symbol[sym]["r_n"] = by_symbol[sym].get("r_n", 0) + 1
             if pnl > 0:
                 by_symbol[sym]["wins"] += 1
             elif pnl < 0:
@@ -506,6 +543,7 @@ class ReconciliationService:
         formatted_buckets = {}
         for k, v in buckets_map.items():
             cnt = v["trades"]
+            rn = v.get("r_n", 0)
             wr = round((v["wins"] / cnt * 100), 1) if cnt > 0 else 0.0
             formatted_buckets[k] = {
                 "trades": cnt,
@@ -513,20 +551,21 @@ class ReconciliationService:
                 "losses": v["losses"],
                 "winrate_pct": wr,
                 "profit_usd": round(v["profit"], 2),
-                "avg_r": round(v["r_sum"] / cnt, 2) if cnt > 0 else 0.0,
+                "avg_r": round(v["r_sum"] / rn, 2) if rn > 0 else 0.0,
             }
 
         # Formatear by_symbol
         formatted_symbols = {}
         for sym, v in by_symbol.items():
             cnt = v["trades"]
+            rn = v.get("r_n", 0)
             formatted_symbols[sym] = {
                 "trades": cnt,
                 "wins": v["wins"],
                 "losses": v["losses"],
                 "winrate_pct": round((v["wins"] / cnt * 100), 1) if cnt > 0 else 0.0,
                 "profit_usd": round(v["profit"], 2),
-                "avg_r": round(v["r_sum"] / cnt, 2) if cnt > 0 else 0.0,
+                "avg_r": round(v["r_sum"] / rn, 2) if rn > 0 else 0.0,
             }
 
         # Motivos de rechazo de setup_log
@@ -569,6 +608,7 @@ class ReconciliationService:
                 "total_setups_evaluated": total_evaluados,
                 "total_setups_approved": total_aprobados,
                 "closed_trades_total": total_trades,
+                "open_partial_trades": len(open_marks),
                 "wins": len(wins),
                 "losses": len(losses),
                 "breakevens": len(breakevens),
@@ -585,5 +625,6 @@ class ReconciliationService:
             "by_exit_reason": by_exit,
             "top_rejection_reasons": sorted(motivos_descarte.items(), key=lambda x: x[1], reverse=True)[:8],
             "recent_trade_marks": marks[:20],
+            "open_trade_marks": open_marks[:20],
             "recent_activity": registros_recientes[:20],
         }

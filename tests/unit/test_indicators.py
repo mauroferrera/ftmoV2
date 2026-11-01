@@ -31,6 +31,7 @@ def test_atr_calculo_correcto_con_gaps():
 
 def test_sl_estructural_buy_con_zona_y_atr():
     # Entrada en 1.0850, distal en 1.0840 (10 pips)
+    # Con atr_min_mult=0.0 se aísla la distancia estructural pura:
     # ATR(14) = 0.0020 (20 pips) -> buffer = 0.15 * 0.0020 = 0.00030 (3 pips)
     # sl_raw = 1.0840 - 0.00030 = 1.08370
     # sl_dist = 1.0850 - 1.08370 = 0.00130 (13 pips)
@@ -44,8 +45,10 @@ def test_sl_estructural_buy_con_zona_y_atr():
         sl_min=0.00100,  # 10 pips min
         tp_ratio=2.0,
         digits=5,
+        atr_min_mult=0.0,
     )
     assert plan["is_structural"] is True
+    assert plan["dist_source"] == "structure"
     assert plan["sl"] == pytest.approx(1.08370)
     assert plan["sl_distance"] == pytest.approx(0.00130)
     assert plan["tp"] == pytest.approx(1.0850 + 0.00130 * 2.0)  # 1.08760
@@ -65,11 +68,31 @@ def test_sl_estructural_sell_con_zona_y_atr():
         sl_min=0.00100,
         tp_ratio=2.0,
         digits=5,
+        atr_min_mult=0.0,
     )
     assert plan["is_structural"] is True
+    assert plan["dist_source"] == "structure"
     assert plan["sl"] == pytest.approx(1.08630)
     assert plan["sl_distance"] == pytest.approx(0.00130)
     assert plan["tp"] == pytest.approx(1.0850 - 0.00130 * 2.0)  # 1.08240
+
+
+def test_sl_estructural_piso_atr_gana_cuando_zona_es_estrecha():
+    # Estructura da 13 pips (0.00130), pero con atr_min_mult=1.0 el ATR de 20 pips manda
+    plan = structural_sl_and_tp(
+        entry=1.0850,
+        direction="BUY",
+        distal=1.0840,
+        atr=0.0020,
+        spread=0.00010,
+        sl_min=0.00100,
+        digits=5,
+        atr_min_mult=1.0,
+    )
+    assert plan["is_structural"] is False
+    assert plan["dist_source"] == "atr"
+    assert plan["sl_distance"] == pytest.approx(0.00200)
+    assert plan["sl"] == pytest.approx(1.08300)
 
 
 def test_sl_estructural_clamp_sl_min():

@@ -181,6 +181,28 @@ class ExecutionService:
         return False, ("{0} no está en symbols_allow ({1}).".format(
             simbolo, ", ".join(permitidos)))
 
+    @staticmethod
+    def _riesgo_efectivo(score: Optional[float], verdict: Optional[str],
+                         cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """El riesgo de la orden en las DOS unidades que usan las puertas.
+
+        `risk_pct` es el % del capital FIJO con el que se dimensiona el lote y
+        `r` la misma cifra en múltiplos de R (1R = `risk_pct` del YAML = una
+        operación nominal). Lo usan el gate de exposición (paso 3c) y el
+        dimensionado (paso 4c) DESDE EL MISMO SITIO: el gate de exposición corre
+        antes de saber el lote, así que declara la R que va a añadir la orden.
+
+        Antes el gate contaba 1.0R para `ALTA_PROBABILIDAD` y 0.5R para el resto
+        mientras el lote podía salir con otro porcentaje (buffer dinámico
+        incluido): dos números para la misma orden, y el tope de 1.5R se
+        comparaba contra el que no era.
+        """
+        eff = risk_engine.effective_risk_pct(score, verdict, cfg)
+        pct = float(eff.get("risk_pct") or 0.0)
+        nominal = float(eff.get("nominal_pct") or 0.0) or pct
+        r = round(pct / nominal, 4) if nominal > 0 and pct > 0 else 1.0
+        return {"eff": eff, "risk_pct": pct, "r": r}
+
     # -- auditoría --------------------------------------------------------------
 
     def _registra(self, entry: Dict[str, Any]) -> Optional[int]:
@@ -223,6 +245,45 @@ class ExecutionService:
             })
         except Exception:  # noqa: BLE001 - la auditoría nunca tumba la ejecución
             return
+
+    def _ticket_de_posicion(self, simbolo: str, resultado: Dict[str, Any],
+                            magic: int) -> Optional[int]:
+        """El ticket de POSICIÓN de una orden recién llenada, o `None`.
+
+        `order_send` devuelve el ticket del DEAL y el de la ORDER,
+        **no el de la posición**. En una cuenta hedging hay que preguntar al
+        histórico a qué posición pertenece ese deal; sin este paso,
+        `trade_marks.position_ticket` guardaba el `order` y la reconciliación
+        buscaba una posición con ese número (M20: `order != position_id`) y no
+        encontraba ninguna.
+
+        La reserva es deliberadamente conservadora: una ÚNICA posición abierta
+        del símbolo con este `magic` es, sin ambigüedad, la que acaba de nacer.
+        Con dos o más, no se adivina: devolver el ticket equivocado sería peor
+        que no publicarlo.
+        """
+        deal = resultado.get("deal")
+        if deal and self._market is not None:
+            try:
+                deals = self._market.history_deals(ticket=int(deal))
+            except Exception:  # noqa: BLE001 - el ticket es un extra, no la orden
+                deals = []
+            for d in deals or ():
+                pid = d.get("position_id")
+                if pid:
+                    return int(pid)
+
+        if self._market is None:
+            return None
+        try:
+            abiertas = self._market.positions(simbolo) or []
+        except Exception:  # noqa: BLE001 - sin posiciones no hay reserva
+            return None
+        propias = [p for p in abiertas
+                   if int(p.get("magic") or 0) == int(magic or 0)]
+        if len(propias) == 1:
+            return int(propias[0].get("ticket") or 0) or None
+        return None
 
     # -- FTMO -------------------------------------------------------------------
 
@@ -426,20 +487,26 @@ class ExecutionService:
 
         # -- 3c. Exposición por cluster, símbolo y riesgo abierto (gate de capital) -
         # No saltable por force=True (misma capa de capital que FTMO y max_trades_day).
+        # La R que suma esta orden se declara aquí y se reutiliza en el
+        # dimensionado (4c): es el MISMO porcentaje, no dos estimaciones.
+        riesgo = self._riesgo_efectivo(score, verdict, cfg)
         try:
             pos_abiertas, err_pos = self.positions()
         except Exception:  # noqa: BLE001 - fallo consultando posiciones
             pos_abiertas, err_pos = None, "Error consultando posiciones"
 
         if pos_abiertas is not None:
-            nueva_r = 1.0 if (verdict or "").upper() == "ALTA_PROBABILIDAD" else 0.5
             permitido_exp, error_exp, codigo_exp = clusters.check_exposure_limits(
                 open_positions=pos_abiertas,
                 new_symbol=simbolo,
-                new_risk_r=nueva_r,
+                new_risk_r=riesgo["r"],
                 max_positions_per_symbol=int(cfg.get("max_positions_per_symbol", 1)),
-                max_positions_per_cluster=int(cfg.get("max_positions_per_cluster", 1)),
+                max_positions_per_cluster=int(cfg.get("max_positions_per_cluster", 2)),
                 max_total_open_risk_r=float(cfg.get("max_total_open_risk_r", 1.5)),
+                # La apuesta se cuenta por FACTOR (USD_long…) y no solo por
+                # divisa: con el conteo por divisa, una posición con USD
+                # bloqueaba 8 de los 12 símbolos.
+                new_direction=acc,
             )
             if not permitido_exp:
                 return {
@@ -472,6 +539,12 @@ class ExecutionService:
         # -- 4b. Distancias y Niveles Estructurales ----------------------------
         digits = getattr(spec, "digits", 5) if spec else 5
         signo = 1.0 if acc == "BUY" else -1.0
+
+        # Si SL y TP llegan como niveles ABSOLUTOS del plan, el R:R que se valida
+        # es el de la TESIS (ver 4e): con el precio vivo, una deriva de 0.2 SL
+        # convierte un plan 2R en 1.5R y la orden se rechazaba.
+        sl_de_plan = sl is not None
+        tp_de_plan = tp is not None and not no_tp
 
         if sl is not None:
             sl_val = round(float(sl), digits)
@@ -546,8 +619,8 @@ class ExecutionService:
                         "symbol": simbolo, "status": "INVALID_TP_LEVEL"}, 400
 
         # -- 4c. Lote ----------------------------------------------------------
-        eff = risk_engine.effective_risk_pct(score, verdict, cfg)
-        base_risk_pct = float(eff.get("risk_pct") or 0.0)
+        eff = riesgo["eff"]
+        base_risk_pct = riesgo["risk_pct"]
         base_riesgo = self._base_de_riesgo(estado_ftmo)
 
         risk_pct = base_risk_pct
@@ -618,6 +691,12 @@ class ExecutionService:
                               "{0:.2f} por lote.".format(perdida_por_lote))
 
         # -- 4e. validate_entry: R:R, estructura, TTL y presupuesto ------------
+        # R:R contra la entrada del PLAN solo cuando SL y TP son los niveles
+        # absolutos que aprobó el gate; si alguno se deriva del precio vivo, el
+        # ratio se mide contra la entrada que de verdad se va a usar.
+        rr_entry = None
+        if sl_de_plan and tp_de_plan:
+            rr_entry = planned_entry if planned_entry is not None else entrada
         val = risk_engine.validate_entry(
             entry=entrada, sl=sl, target=tp, direction=acc,
             current_price=entrada, invalidate_level=invalidate_level,
@@ -625,6 +704,8 @@ class ExecutionService:
             cfg=cfg, balance=base_riesgo, risk_pct=risk_pct,
             loss_per_lot=perdida_por_lote, lot=lote,
             force=force,
+            tick_size=float(getattr(spec, "point", 0.0) or 0.0),
+            rr_entry=rr_entry,
         )
         cal = execution_quality.evaluate(
             entry=entrada, sl=sl, tp=tp, direction=acc,
@@ -698,7 +779,18 @@ class ExecutionService:
                           else (cfg.get("deviation_points") or 20)),
         )
         self._graba_intentos(setup_id, resultado)
+        position_ticket: Optional[int] = None
         if resultado.get("ok"):
+            position_ticket = self._ticket_de_posicion(simbolo, resultado,
+                                                       magic_efectivo)
+            if position_ticket and setup_id is not None and self._store is not None:
+                try:
+                    # El `order` y el `deal` no identifican la posición: la
+                    # reconciliación M20 indexa por `position_ticket`.
+                    self._store.update_trade_result(
+                        setup_id, {"position_ticket": int(position_ticket)})
+                except Exception:  # noqa: BLE001 - la auditoría nunca tumba la orden
+                    pass
             if self._prop is not None and hasattr(self._prop, "record_trade"):
                 try:
                     self._prop.record_trade(self._account_id)
@@ -717,6 +809,10 @@ class ExecutionService:
             "fill_price": resultado.get("fill_price") or resultado.get("price"),
             "deal": resultado.get("deal"),
             "order": resultado.get("order"),
+            # Ticket de POSICIÓN (no el `order`): es la clave con la que el
+            # autotrader gestiona y la reconciliación empareja los deals.
+            "position_ticket": position_ticket,
+            "ticket": position_ticket,
             "retcode": resultado.get("retcode"),
             "filling": resultado.get("filling"),
             "status": resultado.get("status"),
@@ -1073,7 +1169,18 @@ class ExecutionService:
         sl_final = exit_policy.ratchet_sl(vista.get("direction") or "",
                                           _float_or_none(fila.get("sl")),
                                           be_level)
-        tp_final = vista.get("runner_level") if vista.get("set_runner_tp") else None
+        # El TP también es ratchet: `runner_level` no puede RECORTAR un TP de
+        # imán ya colocado (un TP a 3.5R acababa reescrito a 1.5R al mover el
+        # BE, dejando el "runner" con menos objetivo que antes). Sin propuesta
+        # de runner (`set_runner_tp` falso) se manda `None`, que no toca el
+        # nivel: pasar 0.0 lo BORRARÍA.
+        tp_propuesto = (vista.get("runner_level")
+                        if vista.get("set_runner_tp") else None)
+        tp_final = None
+        if tp_propuesto is not None:
+            tp_final = exit_policy.ratchet_tp(vista.get("direction") or "",
+                                              _float_or_none(fila.get("tp")),
+                                              tp_propuesto)
         mod = self._execution.modify_position(objetivo, sl=sl_final, tp=tp_final)
         cuerpo["breakeven"] = mod
         if not mod.get("ok"):

@@ -1657,7 +1657,7 @@ def test_posicion_abierta_en_mismo_cluster_es_rechazada():
     cuerpo, status = _ejecuta(svc, symbol="EURUSD", force=True)
     assert status == 403
     assert cuerpo["status"] == "CLUSTER_EXPOSURE_REACHED"
-    assert "cluster 'USD'" in cuerpo["error"]
+    assert "USD_short" in cuerpo["error"]
     assert puerto.envios == []
 
 

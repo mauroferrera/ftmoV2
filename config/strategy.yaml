@@ -17,9 +17,14 @@ risk:
   # bloqueo de riesgo; dos ventanas distintas desactivan el tope).
   max_trades_day: 3
   # Control de exposición por clusters macro y límites de posiciones (P1 - Audit #8).
-  # Evita acumular riesgo en una misma divisa/factor (ej. 5 cruces AUD simultáneos).
+  # Evita acumular riesgo en una misma apuesta (ej. 5 cruces AUD simultáneos).
   max_positions_per_symbol: 1
-  max_positions_per_cluster: 1
+  # Cupo por FACTOR DIRECCIONAL (USD_long, USD_short, AUD_long…). Dos permiten
+  # diversificar sin apostar dos veces a lo mismo; con 1, una sola posición con
+  # USD bloqueaba 8 de los 12 símbolos.
+  max_positions_per_cluster: 2
+  # Tope NETO de riesgo abierto entre todas las posiciones (en R). Es el freno
+  # que evita que el cupo por factor se convierta en varias apuestas de 1R.
   max_total_open_risk_r: 1.5
   # Sizing dinámico adaptativo por buffer restante de FTMO (P1 - Audit #9).
   # Si el drawdown consume margen, escala el riesgo hacia abajo para no quebrar.
@@ -53,6 +58,10 @@ execution:
     XAUUSD: 8.0
   # Objetivo en múltiplos de R. 2.0 = por cada $1 arriesgado, $2 de objetivo.
   tp_ratio_r: 2.0
+  # Piso de volatilidad del stop, en múltiplos de ATR(14). Un stop DENTRO de una
+  # ATR es ruido: si la zona SMC es más estrecha, manda la volatilidad. 0 lo
+  # desactiva y deja el piso solo en `sl_distance_by_symbol`.
+  structural_atr_min_mult: 1.0
   deviation_points: 15
   # --- Gestión parcial escalada (salida en dos tramos) ---
   # Tramo 1: asegurar caja cerrando el 50% al alcanzar 1:1R y blindando en Break-Even.

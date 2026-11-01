@@ -16,12 +16,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core import clock, strategy
 
 log = logging.getLogger("api.services.autotrader")
+
+#: Cada cuánto se reconcilia el histórico. La reconciliación lee deals de 7
+#: días y reescribe marcas: hacerlo cada 30 s era trabajo pesado de I/O de
+#: bróker + base en CADA ciclo, y los deals cerrados no cambian tan rápido.
+RECONCILE_EVERY_SEC = 300.0
 
 
 class AutoTraderService:
@@ -43,6 +49,10 @@ class AutoTraderService:
         self._executed_count = 0
         self._managed_count = 0
         self._last_error: Optional[str] = None
+        # `monotonic` y no `datetime`: mide INTERVALOS. Comparar sellos ISO con
+        # el reloj de pared da saltos con un ajuste de hora del sistema.
+        self._last_recon_at: Optional[float] = None
+        self._last_recon_summary: Optional[Dict[str, Any]] = None
 
     @property
     def enabled(self) -> bool:
@@ -63,6 +73,7 @@ class AutoTraderService:
             "executed_count": self._executed_count,
             "managed_count": self._managed_count,
             "last_error": self._last_error,
+            "last_reconcile_at": self._last_recon_summary,
             "last_summary": self._last_summary,
         }
 
@@ -126,8 +137,13 @@ class AutoTraderService:
             return results
 
         # 1. Auto-Gestión de Posiciones Abiertas (Parciales a 2R y BE)
+        #
+        # Las tres piezas son síncronas y hablan con MT5 y con SQLite: en
+        # `to_thread` no bloquean el event loop mientras el bróker responde
+        # (antes tres llamadas bloqueantes por ciclo congelaban el resto de la
+        # API justo cuando el dashboard necesita pintar).
         try:
-            managed = self._auto_manage_open_positions()
+            managed = await asyncio.to_thread(self._auto_manage_open_positions)
             results["positions_managed"] = managed
             self._managed_count += len(managed)
         except Exception as exc:
@@ -136,22 +152,54 @@ class AutoTraderService:
 
         # 2. Evaluación de Nuevas Entradas (Auto-Execution)
         try:
-            executed = self._evaluate_and_execute_entries(momento)
+            executed = await asyncio.to_thread(
+                self._evaluate_and_execute_entries, momento)
             results["trades_executed"] = executed
             self._executed_count += len(executed)
         except Exception as exc:
             log.warning("Fallo en evaluación y auto-ejecución: %s", exc)
             results["skipped_reasons"].append(f"Auto-ejecución error: {exc}")
 
-        # 3. Reconciliación de Deals Cerrados -> trade_marks (M20)
+        # 3. Reconciliación de Deals Cerrados -> trade_marks (M20), con throttle:
+        # cada 5 minutos, no cada ciclo. Es I/O de histórico + escritura.
         try:
             recon = getattr(rt, "reconciliation", None)
             if recon is not None:
-                recon.reconcile_closed_trades(days=7)
+                ahora_mono = time.monotonic()
+                vencida = (self._last_recon_at is None
+                           or ahora_mono - self._last_recon_at >= RECONCILE_EVERY_SEC)
+                if vencida:
+                    self._last_recon_summary = await asyncio.to_thread(
+                        recon.reconcile_closed_trades, 7)
+                    self._last_recon_at = ahora_mono
+                    results["reconciliation"] = self._last_recon_summary
+                else:
+                    results["reconciliation"] = {
+                        "status": "throttled",
+                        "seconds_since_last": round(ahora_mono - self._last_recon_at, 1),
+                        "every_sec": RECONCILE_EVERY_SEC,
+                    }
         except Exception as exc:
             log.warning("Fallo en reconciliación de deals: %s", exc)
 
         return results
+
+    def _magic_operado(self) -> Optional[int]:
+        """El `magic` con el que opera el bot, de la config de ejecución.
+
+        `None` cuando no se puede leer: entonces se listan todas las posiciones.
+        Filtrar por magic es lo que separa "las operaciones de este bot" de
+        "cualquier posición de la cuenta" (una manual, de otra estrategia…).
+        """
+        exec_svc = getattr(self._rt, "execution", None)
+        lector = getattr(exec_svc, "_cfg", None)
+        if not callable(lector):
+            return None
+        try:
+            valor = int((lector() or {}).get("magic") or 0)
+        except Exception:  # noqa: BLE001 - sin magic legible no se filtra
+            return None
+        return valor or None
 
     def _auto_manage_open_positions(self) -> List[Dict[str, Any]]:
         """Verifica cada posición abierta y aplica gestión automática a 2R si califica."""
@@ -160,7 +208,14 @@ class AutoTraderService:
         if exec_svc is None:
             return managed_list
 
+        magic = self._magic_operado()
         try:
+            if magic:
+                pos_data, err = exec_svc.positions(magic=magic)
+            else:
+                pos_data, err = exec_svc.positions()
+        except TypeError:
+            # Puerto/doble sin el parámetro `magic`: se lista todo y se sigue.
             pos_data, err = exec_svc.positions()
         except Exception as exc:
             log.warning("No se pudieron leer posiciones en auto-gestión: %s", exc)
@@ -271,16 +326,20 @@ class AutoTraderService:
                 )
 
                 if status_code == 200:
-                    ticket = res.get("ticket")
+                    # `position_ticket` es el ticket de POSICIÓN; `ticket` se
+                    # mantiene como reserva para puertos/dobles antiguos que no
+                    # lo publican (un `order` no sirve para gestionar).
+                    ticket = res.get("position_ticket") or res.get("ticket")
                     lote = res.get("volume")
+                    precio_lleno = res.get("fill_price") or res.get("price")
                     log.info("ORDEN AUTÓNOMA EJECUTADA: #%s %s %s %.2f lotes @ %s",
-                             ticket, symbol, direction, lote or 0.0, res.get("price"))
+                             ticket, symbol, direction, lote or 0.0, precio_lleno)
                     executed.append({
                         "ticket": ticket,
                         "symbol": symbol,
                         "action": direction,
                         "volume": lote,
-                        "price": res.get("price"),
+                        "price": precio_lleno,
                         "sl": res.get("sl"),
                         "tp": res.get("tp"),
                         "score": score,

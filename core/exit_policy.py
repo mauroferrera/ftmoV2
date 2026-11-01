@@ -217,6 +217,36 @@ def ratchet_sl(direction: str, current_sl: Optional[float],
     return min(cur, prop)
 
 
+def ratchet_tp(direction: str, current_tp: Optional[float],
+               proposed_tp: Optional[float]) -> Optional[float]:
+    """El take profit que NO se retrae: conserva el objetivo más ambicioso.
+
+    Es el espejo de `ratchet_sl` para el otro lado del trade. Sin esto, la
+    gestión a 1R reescribía el TP con `runner_ratio_r` y **recortaba** un TP de
+    imán ya colocado a 3.5R: el trade que se dejaba correr acababa con menos
+    objetivo que antes de tocarlo.
+
+    Para BUY, más alto = mejor; para SELL, más bajo. Un TP actual a 0 (sin
+    objetivo) acepta el propuesto tal cual; `proposed_tp` a `None` es "no
+    proponer nada" y conserva el actual.
+    """
+    if proposed_tp is None:
+        return current_tp
+    try:
+        prop = float(proposed_tp)
+    except (TypeError, ValueError):
+        return current_tp
+    try:
+        cur = float(current_tp or 0.0)
+    except (TypeError, ValueError):
+        cur = 0.0
+    if cur <= 0:
+        return prop
+    if str(direction).upper() == "BUY":
+        return max(cur, prop)
+    return min(cur, prop)
+
+
 def runner_level(direction: str, price_open: Optional[float],
                   r_original: Optional[float], runner_ratio: float
                   ) -> Optional[float]:
@@ -378,6 +408,7 @@ __all__ = [
     "r_actual",
     "r_original_from",
     "ratchet_sl",
+    "ratchet_tp",
     "runner_level",
     "runner_ratio_for",
 ]

@@ -68,6 +68,7 @@ DEFAULTS: Dict[str, Any] = {
     "sl_distance": 0.0012,
     "sl_distance_by_symbol": {},
     "tp_ratio_r": 2.0,
+    "structural_atr_min_mult": 1.0,
     "deviation_points": 15,
     "symbols_allow": [],
     # Gestión parcial escalada (salida en dos tramos): el primer tramo se
@@ -82,7 +83,7 @@ DEFAULTS: Dict[str, Any] = {
     "breakeven_offset_by_symbol": {},
     # Control de exposición por clusters y buffer del challenge (P1 - Audit #8, #9)
     "max_positions_per_symbol": 1,
-    "max_positions_per_cluster": 1,
+    "max_positions_per_cluster": 2,
     "max_total_open_risk_r": 1.5,
     "buffer_protection_enabled": True,
     "buffer_protection_divisor": 2.0,
@@ -123,6 +124,7 @@ def _spec_for(key: str) -> Optional[Tuple[str, Optional[float], Optional[float]]
         "sl_distance": (_NUMBER, 0.0, None),
         "sl_distance_by_symbol": (_MAP_NUMBER, None, None),
         "tp_ratio_r": (_NUMBER, 0.0, None),
+        "structural_atr_min_mult": (_NUMBER, 0.0, None),
         "deviation_points": (_NUMBER, 0, None),
         "symbols_allow": (_LIST_STR, None, None),
         "partial_volume_pct": (_NUMBER, 0.0, 100.0),
@@ -316,6 +318,7 @@ def build_flat(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "sl_distance": (e, "sl_distance"),
         "sl_distance_by_symbol": (e, "sl_distance_by_symbol"),
         "tp_ratio_r": (e, "tp_ratio_r"),
+        "structural_atr_min_mult": (e, "structural_atr_min_mult"),
         "deviation_points": (e, "deviation_points"),
         "symbols_allow": (e, "symbols_allow"),
         "partial_volume_pct": (e, "partial_volume_pct"),

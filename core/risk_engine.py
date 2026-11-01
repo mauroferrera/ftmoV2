@@ -353,6 +353,8 @@ def validate_entry(
     loss_per_lot: Optional[float] = None,
     lot: Optional[float] = None,
     force: bool = False,
+    tick_size: Optional[float] = None,
+    rr_entry: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Valida la entrada antes de ejecutar: R:R mínimo, invalidez estructural y TTL.
 
@@ -362,6 +364,18 @@ def validate_entry(
     - TTL: si now - created_at > ttl_minutes el setup expiró.
     - Cabeza de riesgo: con loss_per_lot y lot verifica que la pérdida máxima no
       exceda balance*risk_pct/100.
+
+    **`rr_entry` (M25)**: contra qué entrada se mide el R:R. Por defecto la
+    entrada que se pasa (`entry`, normalmente el precio vivo). Cuando la orden
+    llega con los niveles ABSOLUTOS del plan (SL y TP), el R:R del setup es el
+    de su tesis y se mide contra `planned_entry`: con `entry` vivo, cualquier
+    deriva adversa deja el ratio por debajo del mínimo —a 0.2 SL el R:R de un
+    plan 2R ya es 1.5— y el autotrader rechazaba casi todas las órdenes. La
+    deriva se sigue midiendo aparte (`execution_quality`), que es su puerta.
+
+    `tick_size` (M25) da la tolerancia de UN tick en el R:R: el redondeo de los
+    niveles al tick puede dejar 1.99999 en un plan 2.0, y rechazar eso es
+    rechazar por aritmética, no por estrategia.
 
     `force=True` salta los juicios de SETUP (R:R, invalidez y TTL) —son
     restrictivos de calidad de oportunidad, no topes de capital— pero NUNCA
@@ -380,14 +394,22 @@ def validate_entry(
     reasons: List[str] = []
     force_skipped: List[str] = []
 
+    rr_value: Optional[float] = None
     if sl is None or entry is None:
         rejected = True
         reasons.append("Faltan entry/SL para validar.")
     else:
-        dist_s = abs(float(entry) - float(sl))
+        base_entry = float(rr_entry) if rr_entry is not None else float(entry)
+        dist_s = abs(base_entry - float(sl))
         if target is not None and dist_s > 0:
-            rr = abs(float(target) - float(entry)) / dist_s
-            if rr + 1e-9 < min_rr:
+            dist_t = abs(float(target) - base_entry)
+            rr = dist_t / dist_s
+            rr_value = rr
+            try:
+                tol = max(0.0, float(tick_size or 0.0))
+            except (TypeError, ValueError):
+                tol = 0.0
+            if dist_t + tol + 1e-12 < min_rr * dist_s:
                 motivo = f"R:R {rr:.2f} < mínimo {min_rr:.2f}."
                 if force:
                     force_skipped.append(motivo)
@@ -449,6 +471,7 @@ def validate_entry(
         "sl": sl,
         "target": target,
         "direction": direction,
+        "rr": round(rr_value, 4) if rr_value is not None else None,
     }
 
 

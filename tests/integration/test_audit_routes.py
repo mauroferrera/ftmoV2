@@ -22,7 +22,11 @@ class FakeMarketWithDeals:
 
 
 @pytest.fixture
-def audit_client(tmp_store):
+def audit_client(tmp_store, monkeypatch):
+    # `.env` deja `API_TOKEN` puesto al importar la app y ahora `POST
+    # /api/audit/reconcile` pide token: sin aislarlo, estos tests comprobarían
+    # el 401 en vez de la reconciliación.
+    monkeypatch.delenv("API_TOKEN", raising=False)
     market = FakeMarketWithDeals(deals=[
         {
             "ticket": 7001,
@@ -95,4 +99,44 @@ def test_get_trade_marks_endpoint(audit_client):
     assert len(marks) == 1
     assert marks[0]["ticket"] == 8801
     assert marks[0]["symbol"] == "EURUSD"
+
+
+def test_reconcile_pide_token_si_esta_configurado(audit_client, monkeypatch):
+    """El POST escribe en base: con token configurado, sin él es 401 y con él 200."""
+    monkeypatch.setenv("API_TOKEN", "secreto-de-prueba")
+
+    sin_token = audit_client.post("/api/audit/reconcile?days=14")
+    assert sin_token.status_code == 401
+
+    con_token = audit_client.post(
+        "/api/audit/reconcile?days=14",
+        headers={"X-API-Token": "secreto-de-prueba"},
+    )
+    assert con_token.status_code == 200
+    assert con_token.json()["status"] == "ok"
+
+
+def test_performance_no_cuenta_las_marcas_de_posicion_abierta(audit_client, tmp_store):
+    """Una salida PARCIAL no cierra el trade: no entra en el análisis cerrado."""
+    tmp_store.save_trade_mark({
+        "ticket": 9901,
+        "symbol": "EURUSD",
+        "direction": "BUY",
+        "price_open": 1.0800,
+        "price_close": 1.0840,
+        "profit": 20.0,
+        "r_multiple": 1.0,
+        "exit_quality": "TP_PARTIAL",
+        "outcome_json": {"is_open": True},
+        "context_json": {},
+    })
+    audit_client.post("/api/audit/reconcile")
+
+    resp = audit_client.get("/api/audit/performance")
+    assert resp.status_code == 200
+    data = resp.json()
+    # La única marca CERRADA sigue siendo la del fixture; la parcial se declara.
+    assert data["summary"]["closed_trades_total"] == 1
+    assert data["summary"]["open_partial_trades"] == 1
+
 

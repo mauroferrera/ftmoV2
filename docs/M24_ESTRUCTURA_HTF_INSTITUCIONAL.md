@@ -56,3 +56,4 @@ Se añadió la función pura `_calculate_ema(values, period=9)`:
 ## 3. Verificación
 - `tests/unit/test_core_purity.py`: 78 tests verificando pureza estricta (cero pandas, cero numpy).
 - `tests/unit/test_smc_engine.py`: 17 tests unitarios cubriendo detección de BOS sobre Swing High, detección de CHoCH, Dealing Range swing-to-swing y clasificación Premium/Discount.
+

@@ -44,12 +44,18 @@ def post_audit_reconcile(
     days: int = Query(30, ge=1, le=365),
     account: Optional[str] = Query(None),
     rt: Runtime = Depends(deps.runtime),
+    _auth: None = Depends(deps.require_api_token),
 ) -> Dict[str, Any]:
     """Fuerza la reconciliación entre los deals cerrados en MT5 y `trade_marks`.
-    
+
     Lee los deals de MT5 (`history_deals_get`), empareja entrada con salida,
     calcula PnL neto, R realizado, clasifica la salida (SL, TP, BE, parcial, manual)
     y vincula con `setup_log` si existe.
+
+    Pide token como el resto de escrituras: es un POST que escribe en
+    `trade_marks` y `setup_log`, y las lecturas de `GET /performance` no pueden
+    cubrirlo. Sin token configurado (`API_TOKEN` vacío) sigue abierto, que es el
+    modo de desarrollo declarado en `api/deps.py`.
     """
     ctx_rt = deps.runtime_para_cuenta(rt, account)
     recon = getattr(ctx_rt, "reconciliation", None)
