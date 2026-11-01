@@ -75,11 +75,17 @@ DEFAULTS: Dict[str, Any] = {
     # `runner_ratio_r`. Todos en múltiplos de R salvo los offsets, que van en
     # unidades de precio igual que `sl_distance`.
     "partial_volume_pct": 50.0,
-    "partial_ratio_r": 2.0,
-    "runner_ratio_r": 5.0,
+    "partial_ratio_r": 1.0,
+    "runner_ratio_r": 2.0,
     "set_runner_tp": True,
     "breakeven_offset": 0.00005,
     "breakeven_offset_by_symbol": {},
+    # Control de exposición por clusters y buffer del challenge (P1 - Audit #8, #9)
+    "max_positions_per_symbol": 1,
+    "max_positions_per_cluster": 1,
+    "max_total_open_risk_r": 1.5,
+    "buffer_protection_enabled": True,
+    "buffer_protection_divisor": 2.0,
     # Score. `min_score` y `risk_weights` se leen de `risk_engine` y no se duplican:
     # antes este archivo, `risk_engine` y el YAML tenían tres juegos distintos de
     # pesos y cuatro umbrales. La calibración de producción vive solo en el YAML.
@@ -128,6 +134,11 @@ def _spec_for(key: str) -> Optional[Tuple[str, Optional[float], Optional[float]]
         "min_score": (_NUMBER, 0.0, 100.0),
         "min_rr": (_NUMBER, 0.0, None),
         "setup_ttl_minutes": (_NUMBER, 0, None),
+        "max_positions_per_symbol": (_NUMBER, 1, None),
+        "max_positions_per_cluster": (_NUMBER, 1, None),
+        "max_total_open_risk_r": (_NUMBER, 0.0, None),
+        "buffer_protection_enabled": (_BOOLEAN, None, None),
+        "buffer_protection_divisor": (_NUMBER, 0.1, None),
     }
     return table.get(key)
 
@@ -295,6 +306,11 @@ def build_flat(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "risk_pct": (d, "risk_pct"),
         "reduced_risk_pct": (d, "reduced_risk_pct"),
         "max_trades_day": (d, "max_trades_day"),
+        "max_positions_per_symbol": (d, "max_positions_per_symbol"),
+        "max_positions_per_cluster": (d, "max_positions_per_cluster"),
+        "max_total_open_risk_r": (d, "max_total_open_risk_r"),
+        "buffer_protection_enabled": (d, "buffer_protection_enabled"),
+        "buffer_protection_divisor": (d, "buffer_protection_divisor"),
         "magic": (e, "magic"),
         "comment": (e, "comment"),
         "sl_distance": (e, "sl_distance"),

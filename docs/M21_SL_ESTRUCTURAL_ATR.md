@@ -66,3 +66,4 @@ Hasta esta fase, el sistema adolecía de dos graves inconsistencias estratégica
 * `tests/unit/test_execution_service.py`: pruebas de ejecución a mercado con nivel absoluto `sl`, rechazo de stops invertidos y dimensionamiento exacto del lote.
 * `tests/unit/test_setup_gate.py`: validación de puertas y alineación del umbral `0.5x SL`.
 * **Resultado:** **769 tests pasando en verde** en la suite completa.
+

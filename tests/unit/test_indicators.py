@@ -117,3 +117,4 @@ def test_fallback_sin_zona_usa_1_5_atr():
     assert plan["is_structural"] is False
     assert plan["sl_distance"] == pytest.approx(0.00300)
     assert plan["sl"] == pytest.approx(1.08200)
+

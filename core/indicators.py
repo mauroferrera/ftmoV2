@@ -150,3 +150,4 @@ def structural_sl_and_tp(
         "magnet_applied": magnet_applied,
         "atr_used": round(atr_val, d),
     }
+

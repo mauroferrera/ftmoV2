@@ -49,7 +49,15 @@ from contextlib import nullcontext
 from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple
 
-from core import exit_policy, execution_quality, lot_calculator, risk_engine, strategy
+from core import (
+    clusters,
+    exit_policy,
+    execution_quality,
+    lot_calculator,
+    prop_rules,
+    risk_engine,
+    strategy,
+)
 from core.clock import now_iso
 
 #: Timeframe con el que se registra el setup cuando quien llama no lo dice.
@@ -416,6 +424,30 @@ class ExecutionService:
                     "status": "MAX_TRADES_DAY_REACHED",
                 }, 403
 
+        # -- 3c. Exposición por cluster, símbolo y riesgo abierto (gate de capital) -
+        # No saltable por force=True (misma capa de capital que FTMO y max_trades_day).
+        try:
+            pos_abiertas, err_pos = self.positions()
+        except Exception:  # noqa: BLE001 - fallo consultando posiciones
+            pos_abiertas, err_pos = None, "Error consultando posiciones"
+
+        if pos_abiertas is not None:
+            nueva_r = 1.0 if (verdict or "").upper() == "ALTA_PROBABILIDAD" else 0.5
+            permitido_exp, error_exp, codigo_exp = clusters.check_exposure_limits(
+                open_positions=pos_abiertas,
+                new_symbol=simbolo,
+                new_risk_r=nueva_r,
+                max_positions_per_symbol=int(cfg.get("max_positions_per_symbol", 1)),
+                max_positions_per_cluster=int(cfg.get("max_positions_per_cluster", 1)),
+                max_total_open_risk_r=float(cfg.get("max_total_open_risk_r", 1.5)),
+            )
+            if not permitido_exp:
+                return {
+                    "error": error_exp,
+                    "symbol": simbolo,
+                    "status": codigo_exp or "EXPOSURE_LIMIT_REACHED",
+                }, 403
+
         # -- 4a. Spec y cotización ---------------------------------------------
         try:
             spec = self._market.spec(simbolo)
@@ -515,8 +547,27 @@ class ExecutionService:
 
         # -- 4c. Lote ----------------------------------------------------------
         eff = risk_engine.effective_risk_pct(score, verdict, cfg)
-        risk_pct = float(eff.get("risk_pct") or 0.0)
+        base_risk_pct = float(eff.get("risk_pct") or 0.0)
         base_riesgo = self._base_de_riesgo(estado_ftmo)
+
+        risk_pct = base_risk_pct
+        if cfg.get("buffer_protection_enabled", True) and base_riesgo and estado_ftmo:
+            evaluado = estado_ftmo.get("evaluation") or {}
+            buf_rem = evaluado.get("buffer_remaining_usd")
+            daily_rem = evaluado.get("daily_room_usd")
+            div = float(cfg.get("buffer_protection_divisor") or 2.0)
+            risk_pct = prop_rules.dynamic_risk_pct(
+                base_risk_pct=base_risk_pct,
+                buffer_remaining_usd=buf_rem,
+                daily_room_usd=daily_rem,
+                initial_capital=base_riesgo,
+                divisor=div,
+            )
+            if risk_pct < base_risk_pct:
+                avisos.append(
+                    f"Riesgo reducido dinámicamente por buffer de FTMO ({base_risk_pct}% -> {risk_pct}%): "
+                    f"buffer total ${buf_rem}, room diario ${daily_rem}."
+                )
 
         lote = volume
         lote_nota: Optional[str] = None

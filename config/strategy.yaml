@@ -16,6 +16,15 @@ risk:
   # Máximo de operaciones por día de trading (la misma ventana que cuenta el
   # bloqueo de riesgo; dos ventanas distintas desactivan el tope).
   max_trades_day: 3
+  # Control de exposición por clusters macro y límites de posiciones (P1 - Audit #8).
+  # Evita acumular riesgo en una misma divisa/factor (ej. 5 cruces AUD simultáneos).
+  max_positions_per_symbol: 1
+  max_positions_per_cluster: 1
+  max_total_open_risk_r: 1.5
+  # Sizing dinámico adaptativo por buffer restante de FTMO (P1 - Audit #9).
+  # Si el drawdown consume margen, escala el riesgo hacia abajo para no quebrar.
+  buffer_protection_enabled: true
+  buffer_protection_divisor: 2.0
 
 execution:
   # Magic con que salen las órdenes de ESTE copiloto. Todo lo que no lleve este

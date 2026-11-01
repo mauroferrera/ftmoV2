@@ -119,7 +119,9 @@ class PropFalso:
     def __init__(self, tracked: bool = True, blocked: bool = False,
                  reasons: Optional[List[str]] = None, capital: Any = CAPITAL_TEST,
                  reason: Optional[str] = None, raises: Any = None,
-                 day_trades_count: int = 0) -> None:
+                 day_trades_count: int = 0,
+                 buffer_remaining_usd: float = 1750.0,
+                 daily_room_usd: float = 1000.0) -> None:
         self._tracked = tracked
         self._blocked = blocked
         self._reasons = list(reasons or [])
@@ -127,6 +129,8 @@ class PropFalso:
         self._reason = reason
         self._raises = raises
         self._day_trades_count = day_trades_count
+        self._buffer_remaining_usd = buffer_remaining_usd
+        self._daily_room_usd = daily_room_usd
         self.llamadas = 0
         self.record_trade_called = 0
 
@@ -147,6 +151,8 @@ class PropFalso:
                 "blocked": self._blocked,
                 "reasons": self._reasons,
                 "state": {"day_trades_count": self._day_trades_count},
+                "buffer_remaining_usd": self._buffer_remaining_usd,
+                "daily_room_usd": self._daily_room_usd,
             },
         }
 
@@ -1629,5 +1635,56 @@ def test_sl_invalido_lado_contrario_es_rechazado():
     assert status == 400
     assert cuerpo["status"] == "INVALID_SL_LEVEL"
     assert puerto.envios == []
+
+
+def test_posicion_abierta_en_mismo_simbolo_es_rechazada():
+    """Límite de posiciones por símbolo: no duplicar el mismo par (P1 - Audit #8)."""
+    puerto = PuertoFalso(posiciones=[{"symbol": "EURUSD", "type": "BUY", "price_open": 1.1000, "sl": 1.0980}])
+    svc = _servicio(puerto=puerto)
+    cuerpo, status = _ejecuta(svc, symbol="EURUSD", force=True)
+    assert status == 403
+    assert cuerpo["status"] == "MAX_POSITIONS_PER_SYMBOL_REACHED"
+    assert "Límite de posiciones para EURUSD alcanzado" in cuerpo["error"]
+    assert puerto.envios == []
+
+
+def test_posicion_abierta_en_mismo_cluster_es_rechazada():
+    """Límite por cluster macro: máx 1 posición por divisa/factor (P1 - Audit #8)."""
+    # Tenemos AUDUSD abierto (clusters AUD y USD). Queremos abrir EURUSD (cluster USD)
+    puerto = PuertoFalso(posiciones=[{"symbol": "AUDUSD", "type": "BUY", "price_open": 0.6500, "sl": 0.6480}])
+    cfg = dict(CFG_MINIMA, symbols_allow=["EURUSD", "AUDUSD"], max_positions_per_cluster=1)
+    svc = _servicio(store=StoreFalso(cfg), puerto=puerto)
+    cuerpo, status = _ejecuta(svc, symbol="EURUSD", force=True)
+    assert status == 403
+    assert cuerpo["status"] == "CLUSTER_EXPOSURE_REACHED"
+    assert "cluster 'USD'" in cuerpo["error"]
+    assert puerto.envios == []
+
+
+def test_posicion_en_cluster_independiente_es_permitida():
+    """Si los clusters no colisionan y el riesgo abierto está dentro del tope, se aprueba."""
+    # Tenemos EURUSD abierto pero ya en BE (0.0R de riesgo vivo)
+    puerto = PuertoFalso(posiciones=[{"symbol": "EURUSD", "type": "BUY", "price_open": 1.1000, "sl": 1.1005}])
+    cfg = dict(CFG_MINIMA, symbols_allow=["EURUSD", "GBPJPY"], max_positions_per_cluster=1, max_total_open_risk_r=1.5)
+    svc = _servicio(store=StoreFalso(cfg), puerto=puerto)
+    cuerpo, status = _ejecuta(svc, symbol="GBPJPY")
+    assert status == 200
+    assert cuerpo["ok"] is True
+    assert len(puerto.envios) == 1
+
+
+def test_sizing_dinamico_reduce_lote_con_buffer_bajo():
+    """El sizing respeta el buffer restante de FTMO reduciendo el lote (P1 - Audit #9)."""
+    puerto = PuertoFalso()
+    # Con buffer de solo $100 en cuenta de $25k, el riesgo se reduce de 0.25% a 0.20%
+    prop = PropFalso(capital=25000.0, buffer_remaining_usd=100.0, daily_room_usd=1000.0)
+    svc = _servicio(prop=prop, puerto=puerto)
+    cuerpo, status = _ejecuta(svc, volume=None, sl_distance=0.0020, tp_distance=0.0040)
+    assert status == 200
+    assert cuerpo["ok"] is True
+    assert cuerpo["ok"] is True
+    # Con riesgo reducido a 0.20% ($50) y 20 pips ($200 por lote): lote = 50 / 200 = 0.25 lots (en vez de 0.31)
+    assert puerto.envios[0]["volume"] == pytest.approx(0.25, abs=0.01)
+
 
 

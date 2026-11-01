@@ -458,3 +458,47 @@ def roll_day(
             max(float(state.get("hwm_balance", day_close_balance)),
                 float(day_close_balance)), 4)
     return nuevo
+
+
+def dynamic_risk_pct(
+    base_risk_pct: float,
+    buffer_remaining_usd: Optional[float],
+    daily_room_usd: Optional[float],
+    initial_capital: float,
+    divisor: float = 2.0,
+) -> float:
+    """Dimensionado dinámico de riesgo condicionado por el buffer del challenge (P1 - Audit #9).
+
+    A medida que el drawdown consume el buffer interno (total o diario), reduce el
+    porcentaje de riesgo por operación para evitar agotar el margen en una sola mala racha:
+    risk_pct_efectivo = min(
+        base_risk_pct,
+        (buffer_restante / (divisor * capital)) * 100,
+        (daily_room / (divisor * capital)) * 100
+    )
+    Si divisor=2, ninguna operación puede arriesgar más del 50% del buffer restante.
+    Si el buffer o el capital son <= 0, el riesgo efectivo es 0.0%.
+    """
+    if initial_capital <= 0 or divisor <= 0:
+        return 0.0
+
+    riesgo = float(base_risk_pct)
+    if riesgo <= 0.0:
+        return 0.0
+
+    if buffer_remaining_usd is not None:
+        rem = float(buffer_remaining_usd)
+        if rem <= 0.0:
+            return 0.0
+        tope_buffer_pct = (rem / (divisor * initial_capital)) * 100.0
+        riesgo = min(riesgo, tope_buffer_pct)
+
+    if daily_room_usd is not None:
+        daily = float(daily_room_usd)
+        if daily <= 0.0:
+            return 0.0
+        tope_daily_pct = (daily / (divisor * initial_capital)) * 100.0
+        riesgo = min(riesgo, tope_daily_pct)
+
+    return round(max(0.0, riesgo), 4)
+
