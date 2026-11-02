@@ -184,6 +184,21 @@ class AutoTraderService:
 
         return results
 
+    def _exec_service(self) -> Optional[Any]:
+        """Resuelve el ExecutionService con todas las puertas de riesgo y MT5."""
+        rt = self._rt
+        if rt is None:
+            return None
+        exec_attr = getattr(rt, "execution", None)
+        if hasattr(exec_attr, "execute_market_trade") and hasattr(exec_attr, "management_view"):
+            return exec_attr
+        try:
+            from api.services.execution import execution_from
+            return execution_from(rt)
+        except Exception as exc:
+            log.warning("No se pudo construir ExecutionService para AutoTrader: %s", exc)
+            return None
+
     def _magic_operado(self) -> Optional[int]:
         """El `magic` con el que opera el bot, de la config de ejecución.
 
@@ -191,7 +206,7 @@ class AutoTraderService:
         Filtrar por magic es lo que separa "las operaciones de este bot" de
         "cualquier posición de la cuenta" (una manual, de otra estrategia…).
         """
-        exec_svc = getattr(self._rt, "execution", None)
+        exec_svc = self._exec_service()
         lector = getattr(exec_svc, "_cfg", None)
         if not callable(lector):
             return None
@@ -204,7 +219,7 @@ class AutoTraderService:
     def _auto_manage_open_positions(self) -> List[Dict[str, Any]]:
         """Verifica cada posición abierta y aplica gestión automática a 2R si califica."""
         managed_list: List[Dict[str, Any]] = []
-        exec_svc = getattr(self._rt, "execution", None)
+        exec_svc = self._exec_service()
         if exec_svc is None:
             return managed_list
 
@@ -267,7 +282,7 @@ class AutoTraderService:
         """Escanea setups en M15. Si están aprobados por el gate, envía orden a mercado."""
         executed: List[Dict[str, Any]] = []
         watcher_svc = getattr(self._rt, "watcher", None)
-        exec_svc = getattr(self._rt, "execution", None)
+        exec_svc = self._exec_service()
         market_svc = getattr(self._rt, "market", None)
 
         if not watcher_svc or not exec_svc or not market_svc:
@@ -277,12 +292,46 @@ class AutoTraderService:
         scan_res = watcher_svc.escanear(ahora=momento, force_killzone=False)
         events = scan_res.get("events") or []
 
-        # Buscamos eventos de setup nuevos o activos que estén aprobados
-        for ev in events:
-            # Solo eventos 'new' aprobados con dirección válida
-            if ev.get("event") != "new":
-                continue
+        # Buscamos eventos de setup nuevos o activos aprobados
+        candidatos: List[Dict[str, Any]] = [
+            ev for ev in events if ev.get("event") == "new"
+        ]
 
+        # También consideramos estados que ya estén 'active' en setup_state
+        # y que no tengan ya una posición abierta (ej. bot encendido tras detectarse el setup)
+        store = getattr(self._rt, "store", None)
+        if store is not None:
+            try:
+                pos_abiertas = set()
+                try:
+                    pos_data, _ = exec_svc.positions()
+                    if pos_data:
+                        pos_abiertas = {p.get("symbol") for p in pos_data if p.get("symbol")}
+                except Exception:
+                    pass
+
+                from database import store as db_store
+                for est in db_store.list_setup_states():
+                    sym = est.get("symbol")
+                    if not sym or sym in pos_abiertas:
+                        continue
+                    if any(c.get("symbol") == sym for c in candidatos):
+                        continue
+                    if est.get("status") == "active":
+                        candidatos.append({
+                            "symbol": sym,
+                            "direction": est.get("direction"),
+                            "score": float(est.get("score") or 0.0),
+                            "verdict": est.get("verdict"),
+                            "entry": est.get("entry"),
+                            "sl": est.get("sl"),
+                            "tp": est.get("target"),
+                            "invalidate_level": est.get("invalidate_level"),
+                        })
+            except Exception as exc:
+                log.debug("No se pudieron consultar estados activos adicionales: %s", exc)
+
+        for ev in candidatos:
             symbol = ev.get("symbol")
             tf = ev.get("timeframe") or "M15"
             direction = (ev.get("direction") or "").upper()

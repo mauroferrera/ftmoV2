@@ -49,3 +49,4 @@ Tras la implementación de los hitos M20 a M24, una auditoría técnica profunda
 - **Pureza de Núcleo:** `tests/unit/test_core_purity.py` — 78/78 tests pasados con cero dependencias de MT5, pandas o librerías impuras en `core/`.
 - **Suite Completa:** 805 tests pasados en verde (`pytest -q` / `pytest tests --tb=short`).
 - **Control de Regresión:** Sin fallas de integración en rutas de auditoría, ejecución ni cálculo de indicadores.
+
