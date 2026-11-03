@@ -30,6 +30,8 @@ def test_get_institutional_volume_analysis(client, monkeypatch):
     assert "futures" in data
     assert data["futures"]["available"] is True
     assert data["futures"]["last_volume"] == 1200.0
+    assert "realtime" in data
+    assert data["realtime"]["available"] is True
 
 
 def test_get_institutional_volume_confluence(client, monkeypatch):
@@ -57,5 +59,29 @@ def test_get_institutional_volume_confluence(client, monkeypatch):
     assert data["whale_detected"] is True
     assert data["vol_ratio"] >= 2.0
     assert data["aligned"] is True
+    assert data["evidence_source"] == "CME+SPOT"
     assert "detail" in data
+
+
+def test_get_institutional_volume_cme_down_spot_available(client, monkeypatch):
+    from adapters.tradingview import tv_adapter
+
+    def mock_fetch(self, symbol, *args, **kwargs):
+        if "CME:" in symbol:
+            return []  # CME caído
+        return [
+            {"time": "2026-10-31 10:00", "open": 1.115, "high": 1.120, "low": 1.114, "close": 1.118, "volume": 500}
+            for _ in range(12)
+        ]
+
+    monkeypatch.setattr(tv_adapter.TradingViewAdapter, "fetch_candles", mock_fetch)
+
+    resp = client.get("/api/market/institutional-volume?symbol=EURUSD&direction=BUY&timeframe=M15")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["symbol"] == "EURUSD"
+    assert data["evidence_source"] == "SPOT"
+    assert data["whale_detected"] is False
+    assert data["vol_ratio"] == 1.0  # 500 / 500 = 1.0
+
 

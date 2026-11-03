@@ -3404,18 +3404,23 @@
         if (data.institutional_confluence && data.institutional_confluence.status !== 'SIN_DATOS') {
           const ic = data.institutional_confluence;
           const isWhale = ic.whale_detected;
-          const isLow = ic.status === 'BAJO_VOLUMEN_CME';
+          const isLow = ic.status === 'BAJO_VOLUMEN_CME' || ic.status === 'BAJO_VOLUMEN_SPOT';
           const isAlert = ic.status === 'ALERTA_CONTRA_BALLENAS';
           const icon = isWhale ? '🐋' : (isAlert ? '⚠️' : (isLow ? '📉' : '📊'));
           const color = isWhale ? 'var(--bull)' : (isAlert ? 'var(--bear)' : (isLow ? 'var(--warn)' : 'var(--text-muted)'));
-          const cmeTag = ic.cme_symbol ? `[${ic.cme_symbol}]` : '';
+          const cmeTag = ic.cme_symbol ? `[${ic.cme_symbol}]` : (ic.evidence_source ? `[${ic.evidence_source}]` : '');
           const fmtVol = (v) => v >= 1000 ? `${(v / 1000).toFixed(2)}K` : `${Math.round(v)}`;
-          const volNumTag = (ic.last_volume && ic.last_volume > 0) ? ` ${fmtVol(ic.last_volume)}` : '';
-          const ratioTag = ic.vol_ratio ? ` (${ic.vol_ratio}x vol)` : '';
+          let volNumTag = '';
+          if (ic.closed_volume && ic.forming_volume && ic.closed_volume !== ic.forming_volume && ic.last_volume === ic.forming_volume) {
+            volNumTag = ` ${fmtVol(ic.closed_volume)} cerrada / ${fmtVol(ic.forming_volume)} viva`;
+          } else if (ic.last_volume && ic.last_volume > 0) {
+            volNumTag = ` ${fmtVol(ic.last_volume)}`;
+          }
+          const cmeRatio = ic.vol_ratio_cme != null ? ` (${ic.vol_ratio_cme}x CME)` : (ic.vol_ratio ? ` (${ic.vol_ratio}x)` : '');
           const rtTag = (ic.rt_vol_ratio && ic.rt_vol_ratio > 0) ? ` · Live ${ic.rt_vol_ratio}x` : '';
           const absTag = ic.absorption ? ` · ${ic.absorption.replace(/_/g, ' ')}` : '';
           instBadge.style.display = 'block';
-          instBadge.innerHTML = `<span style="display:inline-block; font-size:0.71rem; padding:0.18rem 0.45rem; border-radius:4px; background:rgba(0,0,0,0.35); border:1px solid ${color}; color:${color};" title="${ic.detail || ''}">${icon} <b>${ic.status.replace(/_/g, ' ')}</b> ${cmeTag}${volNumTag}${ratioTag}${rtTag}${absTag}</span>`;
+          instBadge.innerHTML = `<span style="display:inline-block; font-size:0.71rem; padding:0.18rem 0.45rem; border-radius:4px; background:rgba(0,0,0,0.35); border:1px solid ${color}; color:${color};" title="${ic.detail || ''}">${icon} <b>${ic.status.replace(/_/g, ' ')}</b> ${cmeTag}${volNumTag}${cmeRatio}${rtTag}${absTag}</span>`;
         } else {
           instBadge.style.display = 'none';
         }
@@ -3963,13 +3968,20 @@
       const ic = state.institutionalConfluence;
       const icBorder = ic && ic.whale_detected ? 'var(--bull)' : (ic && ic.status === 'ALERTA_CONTRA_BALLENAS' ? 'var(--bear)' : 'var(--border)');
       const icColor = ic && ic.whale_detected ? 'var(--bull)' : (ic && ic.status === 'ALERTA_CONTRA_BALLENAS' ? 'var(--bear)' : 'var(--text-main)');
+      const icTitle = ic && ic.whale_detected
+        ? '🐋 Respaldo de Ballenas CME Activo'
+        : (ic && ic.status === 'ALTA_CONFLUENCIA_BALLENAS'
+            ? '🐋 Alta Confluencia Institucional'
+            : (ic && ic.status === 'ALERTA_CONTRA_BALLENAS'
+                ? '⚠️ Alerta: Absorción Institucional Contraria'
+                : '📊 Confluencia Institucional'));
       const icHtml = (ic && ic.status && ic.status !== 'SIN_DATOS') ? `
         <div style="margin-top:0.6rem; padding:0.55rem 0.7rem; border-radius:6px; font-size:0.75rem; background:rgba(0,0,0,0.35); border:1px solid ${icBorder};">
           <div style="font-weight:700; color:${icColor};">
-            ${ic.whale_detected ? '🐋 Respaldo Institucional CME Activo' : (ic.status === 'ALERTA_CONTRA_BALLENAS' ? '⚠️ Alerta: Absorción Institucional Contraria' : '📊 Confluencia de Futuros CME')}
+            ${icTitle}
           </div>
           <div style="color:var(--text-main); margin-top:0.2rem;">
-            Contrato: <b>${ic.cme_symbol || ''}</b> · Ratio Volumen: <b>${ic.vol_ratio || 1.0}x</b> ${ic.absorption ? `· <b>${ic.absorption.replace(/_/g, ' ')}</b>` : ''}
+            Fuente: <b>${ic.evidence_source || 'CME'}</b> ${ic.cme_symbol ? `· Contrato: <b>${ic.cme_symbol}</b>` : ''} · CME: <b>${ic.vol_ratio_cme != null ? ic.vol_ratio_cme + 'x' : '—'}</b> ${ic.rt_vol_ratio != null ? `· Spot Live: <b>${ic.rt_vol_ratio}x</b>` : ''} ${ic.absorption ? `· <b>${ic.absorption.replace(/_/g, ' ')}</b>` : ''}
           </div>
           <div style="color:var(--text-dim); margin-top:0.2rem;">${ic.detail || ''}</div>
         </div>

@@ -190,8 +190,8 @@ def test_analyze_futures_volume_prefer_closed_ignores_partial_forming_bar():
 
 
 def test_evaluate_institutional_confluence_realtime_zero_delay_boost():
-    # CME diferido muestra volumen normal, pero el feed OANDA en tiempo real (0 delay)
-    # detecta una ballena con absorción compradora ahora mismo.
+    # CME diferido muestra volumen normal (1.49x), pero el feed OANDA en tiempo real (0 delay)
+    # detecta absorción compradora ahora mismo.
     futures = {
         "available": True,
         "last_volume": 2886.0,
@@ -210,9 +210,49 @@ def test_evaluate_institutional_confluence_realtime_zero_delay_boost():
     res = evaluate_institutional_confluence("BUY", futures, realtime_analysis=realtime)
     assert res["status"] == "ALTA_CONFLUENCIA_BALLENAS"
     assert res["aligned"] is True
-    assert res["whale_detected"] is True
-    assert res["vol_ratio"] == 2.35
+    # Pureza de unidades (D-043): la ballena de contratos es False porque CME no vio ballena,
+    # pero el pico en vivo y absorción quedan registrados honestamente en sus campos correspondientes.
+    assert res["whale_detected"] is False
+    assert res["rt_whale"] is True
+    assert res["vol_ratio"] == 1.49
+    assert res["vol_ratio_cme"] == 1.49
     assert res["rt_vol_ratio"] == 2.35
+    assert res["evidence_source"] == "CME+SPOT"
     assert res["last_volume"] == 2886.0
+
+
+def test_evaluate_institutional_confluence_cme_unavailable_spot_low():
+    # Si CME no responde, sembramos desde el feed spot y detectamos volumen bajo (0.5x)
+    futures = {"available": False}
+    realtime = {"available": True, "vol_ratio": 0.5, "whale_detected": False}
+    res = evaluate_institutional_confluence("BUY", futures, realtime_analysis=realtime)
+    assert res["status"] == "BAJO_VOLUMEN_SPOT"
+    assert res["vol_ratio"] == 0.5
+    assert res["vol_ratio_cme"] is None
+    assert res["rt_vol_ratio"] == 0.5
+    assert res["evidence_source"] == "SPOT"
+    assert "Volumen raquítico (0.5x) en SPOT" in res["detail"]
+
+
+def test_evaluate_institutional_confluence_absorption_with_divergent_smt():
+    # En XAUUSD: absorción compradora en BUY pero SMT bajista (BEARISH_SMT)
+    futures = {
+        "available": True,
+        "last_volume": 4273.0,
+        "closed_volume": 4273.0,
+        "forming_volume": 2227.0,
+        "vol_ratio": 2.0,
+        "whale_detected": True,
+        "absorption": "ABSORCION_COMPRADORA",
+    }
+    smt = {"status": "BEARISH_SMT", "bias": "SELL"}
+    res = evaluate_institutional_confluence("BUY", futures, smt_analysis=smt)
+    assert res["status"] == "ALTA_CONFLUENCIA_BALLENAS"
+    assert res["aligned"] is True
+    # El detail debe ser honesto: menciona absorción y contratos, y alerta sobre la divergencia de SMT
+    assert "absorción ABSORCION_COMPRADORA en CME" in res["detail"]
+    assert "Atención: SMT divergente BEARISH_SMT" in res["detail"]
+    assert "huella de absorción/SMT" not in res["detail"]
+
 
 

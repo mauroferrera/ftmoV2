@@ -252,60 +252,95 @@ def evaluate_institutional_confluence(
     Emite un dictamen de confluencia institucional determinista para un setup técnico.
     `inverted_future=True` aplica cuando el futuro CME cotiza Divisa/USD pero el par spot es USD/Divisa
     (ej. 6C1! para USDCAD, 6J1! para USDJPY, 6S1! para USDCHF).
-    `realtime_analysis` aporta liquidez interbancaria en tiempo real (0s delay, ej. OANDA:<SYM>)
-    para cubrir los últimos 10 minutos del feed diferido de CME sin costo adicional.
+
+    Trazabilidad y pureza de unidades (D-043):
+    - `futures_analysis` refleja contratos reales de futuros CME/COMEX.
+    - `realtime_analysis` refleja tick-volume interbancario de spot (ej. OANDA:<SYM>, 0s delay).
+    - El volumen de ticks de spot NO puede crear `whale_detected = True` por sí solo ni sobreescribir
+      el ratio de contratos de CME. Actúa como confirmación en vivo y cobertura del delay de 10 min.
     """
+    cme_avail = bool(futures_analysis.get("available"))
     rt_avail = bool((realtime_analysis or {}).get("available"))
-    if not futures_analysis.get("available") and not rt_avail:
+
+    if not cme_avail and not rt_avail:
         return {
             "aligned": None,
             "status": "SIN_DATOS",
             "whale_detected": False,
             "vol_ratio": 1.0,
+            "vol_ratio_cme": None,
+            "rt_vol_ratio": None,
             "last_volume": 0.0,
             "closed_volume": 0.0,
             "forming_volume": 0.0,
+            "evidence_source": "NONE",
             "absorption": None,
-            "detail": "Datos de futuros CME no disponibles",
+            "smt_status": "SIN_DATOS",
+            "detail": "Sin datos de volumen institucional ni spot",
         }
 
     direction = (setup_direction or "").upper()
-    whale = bool(futures_analysis.get("whale_detected"))
-    ratio = float(futures_analysis.get("vol_ratio", 1.0))
-    abs_type = futures_analysis.get("absorption")
-    last_vol = float(futures_analysis.get("last_volume", 0.0))
-    closed_vol = float(futures_analysis.get("closed_volume", last_vol))
-    forming_vol = float(futures_analysis.get("forming_volume", last_vol))
 
-    # Evaluación de absorción en CME (respetando si el futuro está invertido respecto al par spot)
-    absorption_alignment = None
-    if abs_type == "ABSORCION_COMPRADORA":
-        absorption_alignment = (direction == ("SELL" if inverted_future else "BUY"))
-    elif abs_type == "ABSORCION_VENDEDORA":
-        absorption_alignment = (direction == ("BUY" if inverted_future else "SELL"))
+    # Datos CME (contratos regulados)
+    cme_whale = bool(futures_analysis.get("whale_detected")) if cme_avail else False
+    cme_ratio = float(futures_analysis.get("vol_ratio") or 1.0) if cme_avail else None
+    cme_abs = futures_analysis.get("absorption") if cme_avail else None
+    last_vol = float(futures_analysis.get("last_volume") or 0.0) if cme_avail else 0.0
+    closed_vol = float(futures_analysis.get("closed_volume") or last_vol) if cme_avail else 0.0
+    forming_vol = float(futures_analysis.get("forming_volume") or last_vol) if cme_avail else 0.0
 
-    # Evaluación de liquidez en tiempo real (0s delay, nunca invertida respecto al par spot)
+    # Datos Spot (ticks 0s delay)
     rt_ratio: Optional[float] = None
     rt_whale = False
     rt_abs = None
-    rt_abs_alignment = None
     if rt_avail and realtime_analysis:
-        rt_ratio = float(realtime_analysis.get("vol_ratio", 1.0))
+        rt_ratio = float(realtime_analysis.get("vol_ratio") or 1.0)
         rt_whale = bool(realtime_analysis.get("whale_detected"))
         rt_abs = realtime_analysis.get("absorption")
-        if rt_abs == "ABSORCION_COMPRADORA":
-            rt_abs_alignment = (direction == "BUY")
-        elif rt_abs == "ABSORCION_VENDEDORA":
-            rt_abs_alignment = (direction == "SELL")
 
-        # Si el feed en vivo (0 delay) detecta un pico o absorción que aún no llegó al CME diferido:
-        if rt_whale:
-            whale = True
-        if rt_ratio > ratio:
-            ratio = rt_ratio
-        if absorption_alignment is None and rt_abs_alignment is not None:
-            absorption_alignment = rt_abs_alignment
-            abs_type = rt_abs
+    # Identificación honesta de la fuente de evidencia
+    if cme_avail and rt_avail:
+        evidence_source = "CME+SPOT"
+    elif cme_avail:
+        evidence_source = "CME"
+    else:
+        evidence_source = "SPOT"
+
+    # Una ballena institucional en futuros proviene estrictamente de contratos CME
+    whale = cme_whale
+
+    # Sembrado del ratio principal: CME prioritario; si CME está caído, usamos Spot
+    if cme_avail:
+        main_ratio = cme_ratio if cme_ratio is not None else 1.0
+    else:
+        main_ratio = rt_ratio if rt_ratio is not None else 1.0
+
+    # Evaluación de absorción institucional
+    cme_abs_alignment = None
+    if cme_abs == "ABSORCION_COMPRADORA":
+        cme_abs_alignment = (direction == ("SELL" if inverted_future else "BUY"))
+    elif cme_abs == "ABSORCION_VENDEDORA":
+        cme_abs_alignment = (direction == ("BUY" if inverted_future else "SELL"))
+
+    rt_abs_alignment = None
+    if rt_abs == "ABSORCION_COMPRADORA":
+        rt_abs_alignment = (direction == "BUY")
+    elif rt_abs == "ABSORCION_VENDEDORA":
+        rt_abs_alignment = (direction == "SELL")
+
+    # Selección de absorción activa: CME tiene prioridad; Spot cubre la ventana en vivo si CME no vio absorción
+    if cme_abs_alignment is not None:
+        abs_type = cme_abs
+        absorption_alignment = cme_abs_alignment
+        abs_source = "CME"
+    elif rt_abs_alignment is not None:
+        abs_type = rt_abs
+        absorption_alignment = rt_abs_alignment
+        abs_source = "SPOT"
+    else:
+        abs_type = None
+        absorption_alignment = None
+        abs_source = None
 
     # Evaluación de SMT
     smt_status = (smt_analysis or {}).get("status", "ALINEADO")
@@ -314,37 +349,68 @@ def evaluate_institutional_confluence(
     if smt_bias in ("BUY", "SELL"):
         smt_alignment = (direction == smt_bias)
 
-    # Veredicto integrado
-    if absorption_alignment is True or (whale and smt_alignment is True):
-        status = "ALTA_CONFLUENCIA_BALLENAS"
-        aligned = True
-        detail = f"Volumen institucional {ratio:.1f}x respaldando la dirección {direction} con huella de absorción/SMT"
-    elif absorption_alignment is False:
+    # Veredicto integrado con redacción honesta del detalle
+    if absorption_alignment is False:
         status = "ALERTA_CONTRA_BALLENAS"
         aligned = False
-        detail = f"Absorción institucional contraria detectada ({abs_type})"
-    elif ratio <= 0.65:
-        status = "BAJO_VOLUMEN_CME"
+        detail = f"Absorción contraria en {abs_source} ({abs_type}) contra {direction}"
+        if smt_alignment is False:
+            detail += f"; además SMT adverso ({smt_status})"
+    elif absorption_alignment is True or (whale and smt_alignment is True):
+        status = "ALTA_CONFLUENCIA_BALLENAS"
+        aligned = True
+        evidences = []
+        if absorption_alignment is True:
+            evidences.append(f"absorción {abs_type} en {abs_source}")
+        if whale and cme_ratio is not None:
+            evidences.append(f"pico de contratos CME ({cme_ratio:.1f}x)")
+        elif rt_whale and rt_ratio is not None:
+            evidences.append(f"pico de ticks en vivo ({rt_ratio:.1f}x)")
+        elif main_ratio >= 1.5:
+            evidences.append(f"volumen elevado ({main_ratio:.1f}x)")
+        if smt_alignment is True:
+            evidences.append(f"SMT confirmando ({smt_status})")
+
+        detail = f"Alta confluencia institucional para {direction}: " + ", ".join(evidences)
+        if smt_alignment is False:
+            detail += f" (Atención: SMT divergente {smt_status})"
+    elif main_ratio <= 0.65:
+        status = "BAJO_VOLUMEN_CME" if cme_avail else "BAJO_VOLUMEN_SPOT"
         aligned = None
-        detail = f"Volumen raquítico ({ratio:.1f}x) en futuros CME; riesgo de falso movimiento"
+        detail = f"Volumen raquítico ({main_ratio:.1f}x) en {evidence_source}; riesgo de falso movimiento"
+        if smt_alignment is False:
+            detail += f" (y SMT divergente {smt_status})"
     elif whale:
         status = "BALLENAS_ACTIVAS"
         aligned = True
-        detail = f"Pico de volumen institucional activo ({ratio:.1f}x)"
+        cme_str = f" ({cme_ratio:.1f}x)" if cme_ratio is not None else ""
+        detail = f"Pico de contratos en CME{cme_str}"
+        if smt_alignment is True:
+            detail += f" con SMT favorable ({smt_status})"
+        elif smt_alignment is False:
+            detail += f" (Atención: SMT divergente {smt_status})"
     else:
         status = "VOLUMEN_ESTANDAR"
         aligned = None
-        detail = f"Actividad institucional normal ({ratio:.1f}x)"
+        detail = f"Actividad institucional normal ({main_ratio:.1f}x en {evidence_source})"
+        if rt_whale and rt_ratio is not None:
+            detail += f" con pico de ticks en spot ({rt_ratio:.1f}x)"
+        if smt_alignment is True:
+            detail += f" con SMT favorable ({smt_status})"
+        elif smt_alignment is False:
+            detail += f" con SMT divergente ({smt_status})"
 
     return {
         "aligned": aligned,
         "status": status,
         "whale_detected": whale,
-        "vol_ratio": ratio,
+        "vol_ratio": main_ratio,
+        "vol_ratio_cme": cme_ratio,
+        "rt_vol_ratio": rt_ratio,
+        "evidence_source": evidence_source,
         "last_volume": last_vol,
         "closed_volume": closed_vol,
         "forming_volume": forming_vol,
-        "rt_vol_ratio": rt_ratio,
         "rt_whale": rt_whale,
         "absorption": abs_type,
         "smt_status": smt_status,

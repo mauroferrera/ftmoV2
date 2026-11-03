@@ -86,18 +86,25 @@ class TradingViewAdapter:
         # Caché de instancia: key -> (timestamp, data)
         self._cache: Dict[str, Tuple[float, Any]] = {}
 
-    def _get_from_cache(self, key: str, shared: bool = False) -> Optional[Any]:
-        store = _SHARED_WS_CACHE if shared else self._cache
-        if key in store:
-            ts, data = store[key]
+    def _get_from_cache(self, key: str, shared: bool = True) -> Optional[Any]:
+        # Revisar primero la caché de instancia
+        if key in self._cache:
+            ts, data = self._cache[key]
             if (time.time() - ts) < self.cache_ttl:
                 return data
-            del store[key]
+            del self._cache[key]
+        # Si shared=True, revisar la caché compartida a nivel de proceso
+        if shared and key in _SHARED_WS_CACHE:
+            ts, data = _SHARED_WS_CACHE[key]
+            if (time.time() - ts) < self.cache_ttl:
+                return data
+            del _SHARED_WS_CACHE[key]
         return None
 
     def _set_cache(self, key: str, data: Any, shared: bool = False) -> None:
-        store = _SHARED_WS_CACHE if shared else self._cache
-        store[key] = (time.time(), data)
+        self._cache[key] = (time.time(), data)
+        if shared:
+            _SHARED_WS_CACHE[key] = (time.time(), data)
 
     def clear_cache(self) -> None:
         self._cache.clear()
@@ -138,10 +145,11 @@ class TradingViewAdapter:
                     )
                 )
 
-                deadline = asyncio.get_event_loop().time() + timeout_sec
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + timeout_sec
                 candles_out: List[Dict[str, Any]] = []
 
-                while asyncio.get_event_loop().time() < deadline:
+                while loop.time() < deadline:
                     try:
                         res = await asyncio.wait_for(ws.recv(), timeout=2.0)
                     except asyncio.TimeoutError:
