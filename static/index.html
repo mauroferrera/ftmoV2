@@ -1653,6 +1653,29 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     }
 
+    .pos-sym-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      cursor: pointer;
+      padding: 0.18rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text-main);
+      font-size: 0.78rem;
+      font-family: inherit;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .pos-sym-btn:hover {
+      background: rgba(0, 229, 153, 0.16);
+      border-color: rgba(0, 229, 153, 0.5);
+      color: var(--bull);
+      transform: translateY(-1px);
+    }
+
     .pnl-pos {
       font-weight: 700;
     }
@@ -3487,7 +3510,11 @@
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>#${pos.ticket}</td>
-          <td><b>${pos.symbol}</b></td>
+          <td>
+            <button type="button" class="pos-sym-btn" onclick="selectSymbol('${pos.symbol}')" title="Ver gráfico de ${pos.symbol}">
+              <b>${pos.symbol}</b> <span style="font-size:0.75rem; opacity:0.8;">↗</span>
+            </button>
+          </td>
           <td><span style="color:var(--${typeCls}); font-weight:700;">${typeStr}</span></td>
           <td>${pos.volume}</td>
           <td>${pos.price_open}</td>
@@ -3660,6 +3687,23 @@
     }
 
     // Renderizar Lista de Símbolos
+    // Cambiar de símbolo activo en el gráfico, matriz HTF y panel de ejecución
+    function selectSymbol(sym, scrollToChart = true) {
+      if (!sym) return;
+      const cleanSym = String(sym).toUpperCase().replace('/', '').trim();
+      state.symbol = cleanSym;
+      resetTradeInputs(true);
+      renderSymbolsList();
+      loadChartData();
+      loadLivePrice();
+      if (scrollToChart) {
+        const target = document.querySelector('.chart-viewport') || $('tv-chart');
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+
     function renderSymbolsList() {
       const listEl = $('symbols-list');
       listEl.innerHTML = '';
@@ -3697,13 +3741,7 @@
             <div class="sym-spread">${activo ? (operable ? '15m SMC' : 'score, sin orden') : 'sin score'}</div>
           </div>
         `;
-        li.onclick = () => {
-          state.symbol = sym;
-          resetTradeInputs(true);
-          renderSymbolsList();
-          loadChartData();
-          loadLivePrice();
-        };
+        li.onclick = () => selectSymbol(sym, false);
         listEl.appendChild(li);
       });
     }
