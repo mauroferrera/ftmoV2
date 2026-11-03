@@ -86,6 +86,10 @@ POSITION_TYPE_SELL = 1
 
 TRADE_RETCODE_DONE = 10009
 TRADE_RETCODE_PLACED = 10008
+TRADE_RETCODE_AUTOTRADING_DISABLED = 10026
+TRADE_RETCODE_CLIENT_DISABLES_AT = 10027
+TRADE_RETCODE_LOCKED = 10028
+TRADE_RETCODE_FROZEN = 10029
 
 # Reintentos: el precio se movió entre que se calculó y que se envió.
 _RETRY_RETCODES = (10004, 10020)  # REQUOTE, PRICE_CHANGED
@@ -114,7 +118,10 @@ RETCODE_MENSAJE = {
     10022: "Orden bloqueada por el bróker.",
     10024: "No hay órdenes para procesar.",
     10025: "No se puede modificar el estado de una orden existente.",
-    10027: "No hay liquidity para cubrir la orden.",
+    10026: "Trading algorítmico deshabilitado por el servidor del bróker.",
+    10027: "Trading algorítmico (Algo Trading) deshabilitado en el terminal MT5.",
+    10028: "Solicitud bloqueada para procesamiento.",
+    10029: "Orden o posición congelada.",
     10030: "Modo de llenado no permitido para esta orden.",
     10031: "Sin conexión con el bróker.",
     10032: "Solo se permiten órdenes de cierre.",
@@ -380,6 +387,15 @@ class MT5ExecutionAdapter:
             "retcode": None, "filling": None,
             "deal": None, "order": None, "attempts": [],
         }
+        # Pre-check de trading algorítmico en el terminal
+        if hasattr(mt5, "terminal_info"):
+            ti = mt5.terminal_info()
+            if ti is not None and not getattr(ti, "trade_allowed", True):
+                base["status"] = "autotrading_disabled"
+                base["retcode"] = TRADE_RETCODE_CLIENT_DISABLES_AT
+                base["error"] = "Trading algorítmico (Algo Trading) deshabilitado en el terminal MT5."
+                return base
+
         if vol is None:
             base["status"] = "volume_invalido"
             base["error"] = ("El lote {0} no es válido para {1}: el bróker admite "

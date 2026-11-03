@@ -201,12 +201,19 @@ class Runtime:
                 self._store_backend = "error"
                 log.warning("base de datos no disponible: %s", exc)
         log.info("runtime listo: store=%s", self._store_backend)
+        if hasattr(self, "autotrader") and self.autotrader is not None:
+            try:
+                if self.autotrader.should_autostart():
+                    log.info("AutoTrader restaurando estado ON previo (autostart)...")
+                    await self.autotrader.start()
+            except Exception as exc:
+                log.warning("no se pudo auto-iniciar autotrader en startup: %s", exc)
 
     async def shutdown(self) -> None:
         """Apaga lo que se encendió. Idempotente."""
         if hasattr(self, "autotrader") and self.autotrader is not None:
             try:
-                await self.autotrader.stop()
+                await self.autotrader.stop(persist=False)
             except Exception:
                 pass
         return None

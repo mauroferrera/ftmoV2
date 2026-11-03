@@ -400,7 +400,11 @@ class FakeMT5(types.ModuleType):
         self.calls.append(("terminal_info",))
         if not self.initialized:
             return None
-        return types.SimpleNamespace(common_data_path=self.terminal_common_path)
+        return types.SimpleNamespace(
+            common_data_path=self.terminal_common_path,
+            connected=True,
+            trade_allowed=getattr(self, "terminal_trade_allowed", True),
+        )
 
     def account_info(self):
         self.calls.append(("account_info",))

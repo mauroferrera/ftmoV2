@@ -4705,19 +4705,33 @@
         const btn = $('btn-autotrader-toggle');
         if (!btn || !ok || !data) return;
         if (data.enabled) {
-          btn.textContent = '🤖 AUTÓNOMO: ON';
-          btn.className = 'badge-pill ok';
-          btn.style.borderColor = 'rgba(0, 229, 153, 0.6)';
-          btn.style.background = 'rgba(0, 229, 153, 0.16)';
-          btn.style.color = '#00e599';
-          btn.title = `Bot Autónomo ACTIVO (Escanea cada ${data.scan_interval_sec}s). Clic para apagar.`;
+          const algoOff = data.last_error && data.last_error.includes('Algo Trading OFF');
+          if (algoOff) {
+            btn.textContent = '🤖 AUTÓNOMO: MT5 ALGO OFF ⚠️';
+            btn.className = 'badge-pill err';
+            btn.style.borderColor = 'rgba(239, 68, 68, 0.7)';
+            btn.style.background = 'rgba(239, 68, 68, 0.18)';
+            btn.style.color = '#ef4444';
+            btn.title = `ALERTA: Trading algorítmico deshabilitado en MT5. Actívalo en la barra superior de MetaTrader 5.`;
+          } else {
+            btn.textContent = '🤖 AUTÓNOMO: ON';
+            btn.className = 'badge-pill ok';
+            btn.style.borderColor = 'rgba(0, 229, 153, 0.6)';
+            btn.style.background = 'rgba(0, 229, 153, 0.16)';
+            btn.style.color = '#00e599';
+            let tooltip = `Bot Autónomo ACTIVO (Escanea cada ${data.scan_interval_sec}s). Clic para apagar.`;
+            if (data.last_rejection) tooltip += `\nÚltimo rechazo: ${data.last_rejection}`;
+            btn.title = tooltip;
+          }
         } else {
           btn.textContent = '🤖 AUTÓNOMO: OFF';
           btn.className = 'badge-pill warn';
           btn.style.borderColor = 'rgba(245, 158, 11, 0.5)';
           btn.style.background = 'rgba(245, 158, 11, 0.12)';
           btn.style.color = '#f59e0b';
-          btn.title = 'Bot Autónomo INACTIVO. Clic para encender en cuenta Demo.';
+          let tooltip = 'Bot Autónomo INACTIVO. Clic para encender en cuenta Demo.';
+          if (data.last_rejection) tooltip += `\nÚltimo rechazo: ${data.last_rejection}`;
+          btn.title = tooltip;
         }
       } catch (e) {
         console.error(e);

@@ -1,4 +1,4 @@
-﻿"""El puerto de ejecución: lo que se manda, lo que NO se manda, y lo que se dice.
+"""El puerto de ejecución: lo que se manda, lo que NO se manda, y lo que se dice.
 
 Estos tests son la última línea antes de que una orden llegue al bróker. Están
 escritos contra la FORMA REAL de MT5 (`order_send` devuelve un objeto o `None`,
@@ -659,3 +659,21 @@ def test_positions_normalizadas_y_vacias_si_cae(monkeypatch):
         assert adapter(s2).positions("EURUSD") == []
     finally:
         s2.shutdown_executor()
+
+
+def test_retcode_10027_traduccion_correcta():
+    from adapters.mt5.mt5_execution import retcode_msg
+    msg = retcode_msg(10027)
+    assert "Algo Trading" in msg or "Trading algorítmico" in msg
+    assert "liquidity" not in msg.lower()
+
+
+def test_send_order_aborta_si_algo_trading_deshabilitado_en_mt5(ejec, mt5):
+    mt5.terminal_trade_allowed = False
+    res = ejec.send_market_order("EURUSD", "BUY", 0.10, sl=1.099, tp=1.102)
+    assert res["ok"] is False
+    assert res["status"] == "autotrading_disabled"
+    assert res["retcode"] == 10027
+    assert "Algo Trading" in res["error"]
+    assert mt5.orders_sent == []
+

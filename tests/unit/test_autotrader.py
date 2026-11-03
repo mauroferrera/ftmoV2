@@ -121,3 +121,68 @@ def test_audit_performance_route():
     assert "summary" in data
     assert data["summary"]["total_setups_evaluated"] == 0
     assert data["summary"]["winrate_pct"] == 0.0
+
+
+def test_autotrader_preflight_blocks_when_terminal_algo_trading_off(monkeypatch, tmp_path):
+    import asyncio
+    from api.services.autotrader import AutoTraderService
+
+    class MockMarketWithAlgoOff:
+        def terminal_info(self):
+            return {"connected": True, "trade_allowed": False}
+
+    async def _test():
+        rt = Runtime(market=MockMarketWithAlgoOff(), execution=FakeExecution(), store=FakeStore())
+        svc = AutoTraderService(runtime=rt, scan_interval_sec=10)
+        monkeypatch.setattr(svc, "_state_file_path", lambda: str(tmp_path / "autotrader_state.json"))
+
+        res = await svc.run_cycle()
+        assert "MT5 Algo Trading OFF" in (svc.status()["last_error"] or "")
+        assert res["trades_executed"] == []
+        assert any("MT5 Algo Trading OFF" in r for r in res["skipped_reasons"])
+
+    asyncio.run(_test())
+
+
+def test_autotrader_rejection_backoff_and_persistence(monkeypatch, tmp_path):
+    import asyncio
+    from api.services.autotrader import AutoTraderService
+
+    class MockExecutionReject:
+        def execute_market_trade(self, *args, **kwargs):
+            return {"error": "Trading algorítmico deshabilitado en el terminal MT5.", "retcode": 10027}, 502
+
+        def positions(self, *args, **kwargs):
+            return [], None
+
+        def management_view(self, *args, **kwargs):
+            return None
+
+    class MockWatcher:
+        def escanear(self, *args, **kwargs):
+            return {"events": [{"event": "new", "symbol": "EURUSD", "direction": "BUY", "score": 80.0, "entry": 1.12, "sl": 1.118, "tp": 1.126}]}
+
+    async def _test():
+        rt = Runtime(market=FakeMarket(), execution=MockExecutionReject(), store=FakeStore())
+        rt.watcher = MockWatcher()
+        svc = AutoTraderService(runtime=rt, scan_interval_sec=10)
+        monkeypatch.setattr(svc, "_state_file_path", lambda: str(tmp_path / "autotrader_state.json"))
+
+        # Test persistencia
+        assert svc.should_autostart() is False
+        await svc.start()
+        assert svc.should_autostart() is True
+
+        # Test ejecución con rechazo y backoff
+        res = await svc.run_cycle()
+        assert res["trades_executed"] == []
+        status = svc.status()
+        assert "Trading algorítmico deshabilitado" in (status["last_rejection"] or "")
+        assert "EURUSD" in svc._symbol_cooldowns
+        assert "XAUUSD" in svc._symbol_cooldowns
+
+        await svc.stop()
+        assert svc.should_autostart() is False
+
+    asyncio.run(_test())
+

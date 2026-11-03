@@ -15,12 +15,14 @@ Diseñado para operar en cuentas Demo / Evaluación con total libertad y discipl
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from core import clock, strategy
+from core import clock, paths, strategy
 
 log = logging.getLogger("api.services.autotrader")
 
@@ -49,6 +51,8 @@ class AutoTraderService:
         self._executed_count = 0
         self._managed_count = 0
         self._last_error: Optional[str] = None
+        self._last_rejection: Optional[str] = None
+        self._symbol_cooldowns: Dict[str, float] = {}
         # `monotonic` y no `datetime`: mide INTERVALOS. Comparar sellos ISO con
         # el reloj de pared da saltos con un ajuste de hora del sistema.
         self._last_recon_at: Optional[float] = None
@@ -62,6 +66,41 @@ class AutoTraderService:
     def account_id(self) -> Optional[str]:
         return self._account_id
 
+    def _state_file_path(self) -> str:
+        return os.path.join(paths.DATABASE_DIR, "autotrader_state.json")
+
+    def should_autostart(self) -> bool:
+        """Determina si el bot debe arrancar automáticamente al iniciar el runtime."""
+        env_auto = os.getenv("AUTOTRADER_AUTOSTART", "").strip().lower() in ("1", "true", "yes", "on")
+        if env_auto:
+            return True
+        p = self._state_file_path()
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return bool(data.get("enabled", False))
+            except Exception:
+                pass
+        return False
+
+    def _persist_state(self, enabled: bool) -> None:
+        """Guarda el estado del AutoTrader en disco de forma atómica."""
+        p = self._state_file_path()
+        try:
+            tmp = p + ".tmp"
+            payload = {
+                "enabled": enabled,
+                "interval_sec": self._interval,
+                "account_id": self._account_id,
+                "updated_at": clock.now_iso(),
+            }
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp, p)
+        except Exception as exc:
+            log.warning("No se pudo persistir estado de AutoTrader: %s", exc)
+
     def status(self) -> Dict[str, Any]:
         """Estado vigente del bot autónomo."""
         return {
@@ -73,6 +112,7 @@ class AutoTraderService:
             "executed_count": self._executed_count,
             "managed_count": self._managed_count,
             "last_error": self._last_error,
+            "last_rejection": self._last_rejection,
             "last_reconcile_at": self._last_recon_summary,
             "last_summary": self._last_summary,
         }
@@ -84,13 +124,16 @@ class AutoTraderService:
 
         self._enabled = True
         self._last_error = None
+        self._persist_state(True)
         self._task = asyncio.create_task(self._run_loop())
         log.info("AutoTrader iniciado en cuenta %s (intervalo %ss)", self._account_id, self._interval)
         return {"ok": True, "message": "AutoTrader activado.", **self.status()}
 
-    async def stop(self) -> Dict[str, Any]:
+    async def stop(self, persist: bool = True) -> Dict[str, Any]:
         """Detiene el worker autónomo."""
         self._enabled = False
+        if persist:
+            self._persist_state(False)
         if self._task is not None and not self._task.done():
             self._task.cancel()
             try:
@@ -128,6 +171,7 @@ class AutoTraderService:
             "timestamp": momento.isoformat(),
             "positions_managed": [],
             "trades_executed": [],
+            "rejected_orders": [],
             "skipped_reasons": [],
         }
 
@@ -135,6 +179,18 @@ class AutoTraderService:
         if rt is None:
             results["skipped_reasons"].append("Runtime no disponible")
             return results
+
+        # Preflight de MT5: validar permisos de trading algorítmico en la terminal
+        market_svc = getattr(rt, "market", None)
+        if market_svc is not None and hasattr(market_svc, "terminal_info"):
+            try:
+                ti = market_svc.terminal_info()
+                if ti and not ti.get("trade_allowed", True):
+                    self._last_error = "MT5 Algo Trading OFF: Habilita 'Algo Trading' en el terminal MetaTrader 5."
+                    results["skipped_reasons"].append(self._last_error)
+                    return results
+            except Exception as exc:
+                log.debug("Preflight terminal_info falló: %s", exc)
 
         # 1. Auto-Gestión de Posiciones Abiertas (Parciales a 2R y BE)
         #
@@ -327,10 +383,12 @@ class AutoTraderService:
                             "sl": est.get("sl"),
                             "tp": est.get("target"),
                             "invalidate_level": est.get("invalidate_level"),
+                            "created_at": est.get("updated_at") or est.get("created_at") or momento.isoformat(),
                         })
             except Exception as exc:
                 log.debug("No se pudieron consultar estados activos adicionales: %s", exc)
 
+        now_mono = time.monotonic()
         for ev in candidatos:
             symbol = ev.get("symbol")
             tf = ev.get("timeframe") or "M15"
@@ -338,6 +396,12 @@ class AutoTraderService:
             score = float(ev.get("score") or 0.0)
 
             if direction not in ("BUY", "SELL"):
+                continue
+
+            # Backoff por símbolo: si fue rechazado recientemente, no bombardear a MT5
+            cd = self._symbol_cooldowns.get(symbol, 0.0)
+            if now_mono < cd:
+                log.debug("Símbolo %s en cooldown tras rechazo previo (%ds restantes)", symbol, int(cd - now_mono))
                 continue
 
             log.info("Setup APROBADO detectado por AutoTrader: %s %s (Score %.1f)", symbol, direction, score)
@@ -350,7 +414,7 @@ class AutoTraderService:
                 "volume": None,
                 "sl": ev.get("sl"),
                 "tp": ev.get("tp"),
-                "created_at": momento.isoformat(),
+                "created_at": ev.get("created_at") or momento.isoformat(),
                 "planned_entry": ev.get("entry"),
                 "invalidate_level": ev.get("invalidate_level"),
                 "score": score,
@@ -375,9 +439,6 @@ class AutoTraderService:
                 )
 
                 if status_code == 200:
-                    # `position_ticket` es el ticket de POSICIÓN; `ticket` se
-                    # mantiene como reserva para puertos/dobles antiguos que no
-                    # lo publican (un `order` no sirve para gestionar).
                     ticket = res.get("position_ticket") or res.get("ticket")
                     lote = res.get("volume")
                     precio_lleno = res.get("fill_price") or res.get("price")
@@ -393,9 +454,20 @@ class AutoTraderService:
                         "tp": res.get("tp"),
                         "score": score,
                     })
+                    self._last_rejection = None
+                    self._symbol_cooldowns.pop(symbol, None)
                 else:
-                    log.warning("Orden rechazada por puertas de seguridad: %s (Status %s)", res, status_code)
+                    err_msg = str(res.get("error") or res.get("detail") or res)
+                    retcode = res.get("retcode")
+                    self._last_rejection = f"[{symbol}] {err_msg}"
+                    # Backoff de 3 minutos tras un rechazo para este símbolo
+                    self._symbol_cooldowns[symbol] = now_mono + 180.0
+                    if retcode == 10027 or "Algo Trading" in err_msg or "deshabilitado" in err_msg:
+                        self._last_error = f"MT5 Algo Trading OFF: {err_msg}"
+                    log.warning("Orden rechazada en %s (Status %s): %s", symbol, status_code, err_msg)
             except Exception as exc:
+                self._last_rejection = f"[{symbol}] Error: {exc}"
+                self._symbol_cooldowns[symbol] = now_mono + 180.0
                 log.error("Excepción al ejecutar trade autónomo en %s: %s", symbol, exc)
 
         return executed

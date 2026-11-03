@@ -136,6 +136,13 @@ class MarketService:
         """Balance, equity, flotante y margen. Lanza si la terminal no responde."""
         return self._adapter.account_info()
 
+    def terminal_info(self) -> Dict[str, Any]:
+        """Estado de conexión y permisos de trading algorítmico del terminal MT5."""
+        fn = getattr(self._adapter, "terminal_info", None)
+        if callable(fn):
+            return fn()
+        return {"connected": True, "trade_allowed": True}
+
     def positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """Posiciones abiertas. `[]` es una respuesta legítima: no tener ninguna."""
         return self._adapter.positions(symbol)

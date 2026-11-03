@@ -19,6 +19,7 @@ docs/CHANGELOG_*.md
 *.sqlite3
 *.backup-*
 backups/
+*autotrader_state.json
 
 # Datos y logs
 data/

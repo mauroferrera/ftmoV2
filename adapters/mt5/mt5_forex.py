@@ -682,6 +682,23 @@ class MT5ForexAdapter:
 
         return self._session.call(_get, account=self._account_id)
 
+    def terminal_info(self) -> Dict[str, Any]:
+        """Estado del terminal MT5 (conexión y permisos de trading algorítmico)."""
+        def _get(mt5) -> Dict[str, Any]:
+            if not hasattr(mt5, "terminal_info"):
+                return {"connected": True, "trade_allowed": True}
+            ti = mt5.terminal_info()
+            if ti is None:
+                return {"connected": False, "trade_allowed": False}
+            return {
+                "connected": bool(getattr(ti, "connected", False)),
+                "trade_allowed": bool(getattr(ti, "trade_allowed", False)),
+                "tradeapi_disabled": bool(getattr(ti, "tradeapi_disabled", False)),
+                "name": str(getattr(ti, "name", "") or ""),
+            }
+
+        return self._session.call(_get, account=self._account_id)
+
 
 def _fila_posicion(pos: Any) -> Dict[str, Any]:
     """Posición de MT5 -> dict normalizado, sin inventar ceros donde no hay dato."""
