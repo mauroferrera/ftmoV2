@@ -150,3 +150,69 @@ def test_evaluate_institutional_confluence_inverted_future():
     assert res_buy["status"] == "ALERTA_CONTRA_BALLENAS"
     assert res_buy["aligned"] is False
 
+
+def test_analyze_futures_volume_prefer_closed_ignores_partial_forming_bar():
+    # 10 velas previas con volumen 1930, última cerrada (candles[-2]) con 2886 contratos (2.89K),
+    # y vela recién abierta en formación (candles[-1]) con apenas 703 contratos.
+    candles = [
+        {"time": f"2026-11-03 10:{i:02d}", "open": 1.119, "high": 1.120, "low": 1.118, "close": 1.1195, "volume": 1930}
+        for i in range(10)
+    ]
+    candles.append({
+        "time": "2026-11-03 12:00",
+        "open": 1.1195,
+        "high": 1.1202,
+        "low": 1.1191,
+        "close": 1.1197,
+        "volume": 2886,
+    })
+    candles.append({
+        "time": "2026-11-03 12:15",
+        "open": 1.1197,
+        "high": 1.1199,
+        "low": 1.1195,
+        "close": 1.1196,
+        "volume": 703,
+    })
+
+    # Sin prefer_closed penalizaría la vela recién abierta (703 / 2016.9 = 0.35x)
+    res_forming = analyze_futures_volume(candles, lookback=10, prefer_closed=False)
+    assert res_forming["last_volume"] == 703.0
+    assert res_forming["vol_ratio"] < 0.65
+
+    # Con prefer_closed=True toma la vela cerrada de 2886 contratos (1.5x del promedio)
+    res_closed = analyze_futures_volume(candles, lookback=10, prefer_closed=True)
+    assert res_closed["last_volume"] == 2886.0
+    assert res_closed["closed_volume"] == 2886.0
+    assert res_closed["forming_volume"] == 703.0
+    assert res_closed["vol_ratio"] == 1.5
+    assert res_closed["vol_tag"] == "NORMAL"
+
+
+def test_evaluate_institutional_confluence_realtime_zero_delay_boost():
+    # CME diferido muestra volumen normal, pero el feed OANDA en tiempo real (0 delay)
+    # detecta una ballena con absorción compradora ahora mismo.
+    futures = {
+        "available": True,
+        "last_volume": 2886.0,
+        "closed_volume": 2886.0,
+        "forming_volume": 703.0,
+        "whale_detected": False,
+        "vol_ratio": 1.49,
+        "absorption": None,
+    }
+    realtime = {
+        "available": True,
+        "whale_detected": True,
+        "vol_ratio": 2.35,
+        "absorption": "ABSORCION_COMPRADORA",
+    }
+    res = evaluate_institutional_confluence("BUY", futures, realtime_analysis=realtime)
+    assert res["status"] == "ALTA_CONFLUENCIA_BALLENAS"
+    assert res["aligned"] is True
+    assert res["whale_detected"] is True
+    assert res["vol_ratio"] == 2.35
+    assert res["rt_vol_ratio"] == 2.35
+    assert res["last_volume"] == 2886.0
+
+

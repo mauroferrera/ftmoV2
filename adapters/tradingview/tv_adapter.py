@@ -68,6 +68,11 @@ TV_TIMEFRAMES: Dict[str, str] = {
 }
 
 
+#: Caché compartido a nivel de proceso para evitar reconexiones WebSocket redundantes
+#: cuando se instancian múltiples TradingViewAdapter entre requests.
+_SHARED_WS_CACHE: Dict[str, Tuple[float, Any]] = {}
+
+
 def _format_ws_msg(func: str, param_list: list) -> str:
     payload = json.dumps({"m": func, "p": param_list}, separators=(",", ":"))
     return f"~m~{len(payload)}~m~{payload}"
@@ -78,22 +83,25 @@ class TradingViewAdapter:
 
     def __init__(self, cache_ttl_seconds: float = 25.0) -> None:
         self.cache_ttl = cache_ttl_seconds
-        # Caché: key -> (timestamp, data)
+        # Caché de instancia: key -> (timestamp, data)
         self._cache: Dict[str, Tuple[float, Any]] = {}
 
-    def _get_from_cache(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            ts, data = self._cache[key]
+    def _get_from_cache(self, key: str, shared: bool = False) -> Optional[Any]:
+        store = _SHARED_WS_CACHE if shared else self._cache
+        if key in store:
+            ts, data = store[key]
             if (time.time() - ts) < self.cache_ttl:
                 return data
-            del self._cache[key]
+            del store[key]
         return None
 
-    def _set_cache(self, key: str, data: Any) -> None:
-        self._cache[key] = (time.time(), data)
+    def _set_cache(self, key: str, data: Any, shared: bool = False) -> None:
+        store = _SHARED_WS_CACHE if shared else self._cache
+        store[key] = (time.time(), data)
 
     def clear_cache(self) -> None:
         self._cache.clear()
+        _SHARED_WS_CACHE.clear()
 
     async def fetch_candles_async(
         self,
@@ -104,7 +112,7 @@ class TradingViewAdapter:
     ) -> List[Dict[str, Any]]:
         """Descarga velas OHLCV desde el WebSocket oficial de TradingView."""
         cache_key = f"candles:{symbol}:{timeframe}:{n_bars}"
-        cached = self._get_from_cache(cache_key)
+        cached = self._get_from_cache(cache_key, shared=True)
         if cached is not None:
             return cached
 
@@ -174,7 +182,7 @@ class TradingViewAdapter:
                                                 "volume": vol,
                                             })
                                     if candles_out:
-                                        self._set_cache(cache_key, candles_out)
+                                        self._set_cache(cache_key, candles_out, shared=True)
                                         return candles_out
                         except Exception:
                             pass
@@ -224,7 +232,8 @@ class TradingViewAdapter:
     ) -> Dict[str, Any]:
         """
         Calcula el análisis institucional completo para un símbolo:
-        - Volumen real de contratos de futuros CME
+        - Volumen real de contratos de futuros CME (evaluando vela cerrada + viva con prefer_closed=True)
+        - Liquidez interbancaria en tiempo real (0s delay via OANDA:<SYM>) para cubrir la ventana diferida
         - Detección de divergencia SMT con DXY (si aplica)
         """
         clean_sym = (symbol or "").upper().replace("/", "")
@@ -239,27 +248,40 @@ class TradingViewAdapter:
         if cme_sym:
             cme_candles = self.fetch_candles(cme_sym, timeframe=timeframe, n_bars=lookback + 5)
             if cme_candles:
-                futures_analysis = analyze_futures_volume(cme_candles, lookback=lookback)
+                futures_analysis = analyze_futures_volume(
+                    cme_candles, lookback=lookback, prefer_closed=True
+                )
                 futures_analysis["cme_symbol"] = cme_sym
 
-        # SMT Divergence con DXY solo para pares con pata USD
+        # Liquidez institucional en tiempo real (0s delay) via OANDA:<SYM>
+        rt_analysis: Dict[str, Any] = {"available": False}
+        rt_sym = f"OANDA:{clean_sym}"
+        spot_candles: List[Dict[str, Any]] = []
+        try:
+            spot_candles = self.fetch_candles(rt_sym, timeframe=timeframe, n_bars=lookback + 5)
+            if spot_candles:
+                rt_analysis = analyze_futures_volume(
+                    spot_candles, lookback=lookback, prefer_closed=True
+                )
+                rt_analysis["rt_symbol"] = rt_sym
+        except Exception as exc:
+            log.debug("no se pudo consultar volumen realtime %s: %s", rt_sym, exc)
+
+        # SMT Divergence con DXY solo para pares con pata USD (0s delay en ambos feeds)
         smt_res: Optional[Dict[str, Any]] = None
-        if clean_sym in USD_QUOTE_PAIRS:
+        if clean_sym in USD_QUOTE_PAIRS or clean_sym in USD_BASE_PAIRS:
             try:
-                spot_sym = f"FX_IDC:{clean_sym}"
-                spot_candles = self.fetch_candles(spot_sym, timeframe=timeframe, n_bars=10)
+                if not spot_candles:
+                    spot_candles = self.fetch_candles(
+                        f"FX_IDC:{clean_sym}", timeframe=timeframe, n_bars=10
+                    )
                 dxy_candles = self.fetch_candles(DXY_SYMBOL, timeframe=timeframe, n_bars=10)
                 if spot_candles and dxy_candles:
-                    smt_res = detect_smt_divergence(spot_candles, dxy_candles, inverse=True)
-            except Exception as exc:
-                log.debug("no se pudo calcular SMT para %s: %s", clean_sym, exc)
-        elif clean_sym in USD_BASE_PAIRS:
-            try:
-                spot_sym = f"FX_IDC:{clean_sym}"
-                spot_candles = self.fetch_candles(spot_sym, timeframe=timeframe, n_bars=10)
-                dxy_candles = self.fetch_candles(DXY_SYMBOL, timeframe=timeframe, n_bars=10)
-                if spot_candles and dxy_candles:
-                    smt_res = detect_smt_divergence(spot_candles, dxy_candles, inverse=False)
+                    smt_res = detect_smt_divergence(
+                        spot_candles[-10:],
+                        dxy_candles[-10:],
+                        inverse=(clean_sym in USD_QUOTE_PAIRS),
+                    )
             except Exception as exc:
                 log.debug("no se pudo calcular SMT para %s: %s", clean_sym, exc)
 
@@ -268,6 +290,7 @@ class TradingViewAdapter:
             "cme_symbol": cme_sym,
             "timeframe": timeframe,
             "futures": futures_analysis,
+            "realtime": rt_analysis,
             "smt": smt_res,
             "updated_at": clock.now_iso(),
         }
@@ -281,10 +304,15 @@ class TradingViewAdapter:
         clean_sym = (symbol or "").upper().replace("/", "")
         analysis = self.get_institutional_analysis(clean_sym, timeframe)
         futures = analysis.get("futures") or {}
+        realtime = analysis.get("realtime") or {}
         smt = analysis.get("smt")
         inverted = clean_sym in USD_BASE_PAIRS
         confluence = evaluate_institutional_confluence(
-            direction, futures, smt, inverted_future=inverted
+            direction,
+            futures,
+            smt,
+            inverted_future=inverted,
+            realtime_analysis=realtime,
         )
         confluence["cme_symbol"] = analysis.get("cme_symbol")
         confluence["symbol"] = clean_sym

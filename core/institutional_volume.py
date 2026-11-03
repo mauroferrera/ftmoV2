@@ -74,11 +74,18 @@ def detect_absorption(
 
 
 def analyze_futures_volume(
-    candles: List[Dict[str, Any]], lookback: int = 10
+    candles: List[Dict[str, Any]],
+    lookback: int = 10,
+    prefer_closed: bool = False,
 ) -> Dict[str, Any]:
     """
-    Analiza una serie de velas de futuros (ej. CME:6E1! o COMEX:GC1!).
-    Devuelve métricas cuantitativas de la última vela y de la serie reciente.
+    Analiza una serie de velas de futuros o liquidez institucional (ej. CME:6E1! u OANDA:EURUSD).
+    Devuelve métricas cuantitativas de la vela de referencia y de la serie reciente.
+
+    Si `prefer_closed=True` y hay al menos 3 velas, toma como referencia la última
+    vela CERRADA (`candles[-2]`) para no penalizar una vela que recién acaba de abrir,
+    SALVO que la vela en formación (`candles[-1]`) ya supere el volumen promedio o
+    muestre absorción/pico institucional en curso.
     """
     if not candles:
         return {
@@ -92,20 +99,46 @@ def analyze_futures_volume(
         }
 
     vols = [float(c.get("volume", 0.0)) for c in candles]
-    last_candle = candles[-1]
-    last_vol = float(last_candle.get("volume", 0.0))
+    forming_candle = candles[-1]
+    forming_vol = float(forming_candle.get("volume", 0.0))
 
-    # Promedio previo a la última vela (para no contaminar con la vela en evaluación)
-    prior_vols = vols[:-1] if len(vols) > 1 else vols
-    avg_vol = (sum(prior_vols[-lookback:]) / min(len(prior_vols), lookback)) if prior_vols else last_vol
+    if prefer_closed and len(candles) >= 3:
+        closed_candle = candles[-2]
+        closed_vol = float(closed_candle.get("volume", 0.0))
+        prior_vols = vols[:-2]
+        avg_vol = (
+            (sum(prior_vols[-lookback:]) / min(len(prior_vols), lookback))
+            if prior_vols
+            else closed_vol
+        )
+        # Si la vela en formación ya supera el promedio o tiene absorción activa, usamos la viva
+        forming_abs = detect_absorption(forming_candle, avg_vol)
+        if forming_vol >= max(avg_vol, closed_vol) or forming_abs is not None:
+            ref_candle = forming_candle
+            ref_vol = forming_vol
+        else:
+            ref_candle = closed_candle
+            ref_vol = closed_vol
+    else:
+        ref_candle = forming_candle
+        ref_vol = forming_vol
+        closed_vol = float(candles[-2].get("volume", 0.0)) if len(candles) >= 2 else ref_vol
+        prior_vols = vols[:-1] if len(vols) > 1 else vols
+        avg_vol = (
+            (sum(prior_vols[-lookback:]) / min(len(prior_vols), lookback))
+            if prior_vols
+            else ref_vol
+        )
 
-    tag, ratio, is_whale = classify_volume_activity(last_vol, avg_vol)
-    absorption = detect_absorption(last_candle, avg_vol)
+    tag, ratio, is_whale = classify_volume_activity(ref_vol, avg_vol)
+    absorption = detect_absorption(ref_candle, avg_vol)
 
     return {
         "available": True,
-        "time": last_candle.get("time"),
-        "last_volume": round(last_vol, 1),
+        "time": ref_candle.get("time"),
+        "last_volume": round(ref_vol, 1),
+        "closed_volume": round(closed_vol, 1),
+        "forming_volume": round(forming_vol, 1),
         "avg_volume": round(avg_vol, 1),
         "vol_ratio": ratio,
         "vol_tag": tag,
@@ -213,18 +246,25 @@ def evaluate_institutional_confluence(
     futures_analysis: Dict[str, Any],
     smt_analysis: Optional[Dict[str, Any]] = None,
     inverted_future: bool = False,
+    realtime_analysis: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Emite un dictamen de confluencia institucional determinista para un setup técnico.
     `inverted_future=True` aplica cuando el futuro CME cotiza Divisa/USD pero el par spot es USD/Divisa
     (ej. 6C1! para USDCAD, 6J1! para USDJPY, 6S1! para USDCHF).
+    `realtime_analysis` aporta liquidez interbancaria en tiempo real (0s delay, ej. OANDA:<SYM>)
+    para cubrir los últimos 10 minutos del feed diferido de CME sin costo adicional.
     """
-    if not futures_analysis.get("available"):
+    rt_avail = bool((realtime_analysis or {}).get("available"))
+    if not futures_analysis.get("available") and not rt_avail:
         return {
             "aligned": None,
             "status": "SIN_DATOS",
             "whale_detected": False,
             "vol_ratio": 1.0,
+            "last_volume": 0.0,
+            "closed_volume": 0.0,
+            "forming_volume": 0.0,
             "absorption": None,
             "detail": "Datos de futuros CME no disponibles",
         }
@@ -233,13 +273,39 @@ def evaluate_institutional_confluence(
     whale = bool(futures_analysis.get("whale_detected"))
     ratio = float(futures_analysis.get("vol_ratio", 1.0))
     abs_type = futures_analysis.get("absorption")
+    last_vol = float(futures_analysis.get("last_volume", 0.0))
+    closed_vol = float(futures_analysis.get("closed_volume", last_vol))
+    forming_vol = float(futures_analysis.get("forming_volume", last_vol))
 
-    # Evaluación de absorción (respetando si el futuro está invertido respecto al par spot)
+    # Evaluación de absorción en CME (respetando si el futuro está invertido respecto al par spot)
     absorption_alignment = None
     if abs_type == "ABSORCION_COMPRADORA":
         absorption_alignment = (direction == ("SELL" if inverted_future else "BUY"))
     elif abs_type == "ABSORCION_VENDEDORA":
         absorption_alignment = (direction == ("BUY" if inverted_future else "SELL"))
+
+    # Evaluación de liquidez en tiempo real (0s delay, nunca invertida respecto al par spot)
+    rt_ratio: Optional[float] = None
+    rt_whale = False
+    rt_abs = None
+    rt_abs_alignment = None
+    if rt_avail and realtime_analysis:
+        rt_ratio = float(realtime_analysis.get("vol_ratio", 1.0))
+        rt_whale = bool(realtime_analysis.get("whale_detected"))
+        rt_abs = realtime_analysis.get("absorption")
+        if rt_abs == "ABSORCION_COMPRADORA":
+            rt_abs_alignment = (direction == "BUY")
+        elif rt_abs == "ABSORCION_VENDEDORA":
+            rt_abs_alignment = (direction == "SELL")
+
+        # Si el feed en vivo (0 delay) detecta un pico o absorción que aún no llegó al CME diferido:
+        if rt_whale:
+            whale = True
+        if rt_ratio > ratio:
+            ratio = rt_ratio
+        if absorption_alignment is None and rt_abs_alignment is not None:
+            absorption_alignment = rt_abs_alignment
+            abs_type = rt_abs
 
     # Evaluación de SMT
     smt_status = (smt_analysis or {}).get("status", "ALINEADO")
@@ -252,11 +318,11 @@ def evaluate_institutional_confluence(
     if absorption_alignment is True or (whale and smt_alignment is True):
         status = "ALTA_CONFLUENCIA_BALLENAS"
         aligned = True
-        detail = f"Volumen CME {ratio:.1f}x respaldando la dirección {direction} con huella institucional"
+        detail = f"Volumen institucional {ratio:.1f}x respaldando la dirección {direction} con huella de absorción/SMT"
     elif absorption_alignment is False:
         status = "ALERTA_CONTRA_BALLENAS"
         aligned = False
-        detail = f"Absorción contraria detectada en CME ({abs_type})"
+        detail = f"Absorción institucional contraria detectada ({abs_type})"
     elif ratio <= 0.65:
         status = "BAJO_VOLUMEN_CME"
         aligned = None
@@ -264,17 +330,22 @@ def evaluate_institutional_confluence(
     elif whale:
         status = "BALLENAS_ACTIVAS"
         aligned = True
-        detail = f"Pico de contratos en CME ({ratio:.1f}x)"
+        detail = f"Pico de volumen institucional activo ({ratio:.1f}x)"
     else:
         status = "VOLUMEN_ESTANDAR"
         aligned = None
-        detail = f"Actividad normal en CME ({ratio:.1f}x)"
+        detail = f"Actividad institucional normal ({ratio:.1f}x)"
 
     return {
         "aligned": aligned,
         "status": status,
         "whale_detected": whale,
         "vol_ratio": ratio,
+        "last_volume": last_vol,
+        "closed_volume": closed_vol,
+        "forming_volume": forming_vol,
+        "rt_vol_ratio": rt_ratio,
+        "rt_whale": rt_whale,
         "absorption": abs_type,
         "smt_status": smt_status,
         "detail": detail,

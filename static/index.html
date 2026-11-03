@@ -3397,7 +3397,7 @@
         }
       }
 
-      // Confluencia institucional de Futuros CME (TradingView)
+      // Confluencia institucional de Futuros CME + Liquidez Realtime (TradingView)
       state.institutionalConfluence = data.institutional_confluence || null;
       const instBadge = $('setup-institutional-badge');
       if (instBadge) {
@@ -3409,10 +3409,13 @@
           const icon = isWhale ? '🐋' : (isAlert ? '⚠️' : (isLow ? '📉' : '📊'));
           const color = isWhale ? 'var(--bull)' : (isAlert ? 'var(--bear)' : (isLow ? 'var(--warn)' : 'var(--text-muted)'));
           const cmeTag = ic.cme_symbol ? `[${ic.cme_symbol}]` : '';
-          const ratioTag = ic.vol_ratio ? ` · ${ic.vol_ratio}x vol` : '';
+          const fmtVol = (v) => v >= 1000 ? `${(v / 1000).toFixed(2)}K` : `${Math.round(v)}`;
+          const volNumTag = (ic.last_volume && ic.last_volume > 0) ? ` ${fmtVol(ic.last_volume)}` : '';
+          const ratioTag = ic.vol_ratio ? ` (${ic.vol_ratio}x vol)` : '';
+          const rtTag = (ic.rt_vol_ratio && ic.rt_vol_ratio > 0) ? ` · Live ${ic.rt_vol_ratio}x` : '';
           const absTag = ic.absorption ? ` · ${ic.absorption.replace(/_/g, ' ')}` : '';
           instBadge.style.display = 'block';
-          instBadge.innerHTML = `<span style="display:inline-block; font-size:0.71rem; padding:0.18rem 0.45rem; border-radius:4px; background:rgba(0,0,0,0.35); border:1px solid ${color}; color:${color};" title="${ic.detail || ''}">${icon} <b>${ic.status.replace(/_/g, ' ')}</b> ${cmeTag}${ratioTag}${absTag}</span>`;
+          instBadge.innerHTML = `<span style="display:inline-block; font-size:0.71rem; padding:0.18rem 0.45rem; border-radius:4px; background:rgba(0,0,0,0.35); border:1px solid ${color}; color:${color};" title="${ic.detail || ''}">${icon} <b>${ic.status.replace(/_/g, ' ')}</b> ${cmeTag}${volNumTag}${ratioTag}${rtTag}${absTag}</span>`;
         } else {
           instBadge.style.display = 'none';
         }
