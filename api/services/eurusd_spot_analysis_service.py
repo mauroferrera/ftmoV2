@@ -20,6 +20,8 @@ from api.services.eurusd_web_intel import (
     run_gemini_grounded_tribunal,
 )
 from core import clock, paths
+from core.bank_consensus import format_bank_consensus_for_prompt, load_bank_analyses_data
+from core.daily_guide import compute_daily_guide
 from core.eurusd_spot_analysis_schema import count_consensus, validate_report
 from core.eurusd_spot_tech_calc import (
     build_deterministic_tribunal,
@@ -367,6 +369,7 @@ class EurUsdSpotAnalysisService:
                 calendar_events = []
 
         det_mode = "rss_plus_deterministic" if (rss_items or calendar_events) else "deterministic_fallback"
+        bank_data = load_bank_analyses_data()
         det_tribunal = build_deterministic_tribunal(
             current_price=current_price,
             m15_indicators=inds,
@@ -481,7 +484,7 @@ class EurUsdSpotAnalysisService:
             c_vs_d = str(parsed.get("consensus_vs_dissent") or tribunal["verdict"]["ruling"])
             s_text = str(parsed.get("raw_summary_md") or "").strip()
             if not s_text:
-                s_text = self._render_tribunal_markdown(price_info, tech, tribunal, calendar_events)
+                s_text = self._render_tribunal_markdown(price_info, tech, tribunal, calendar_events, bank_data=bank_data)
 
             llm_sources = parsed.get("sources_evaluated") if isinstance(parsed.get("sources_evaluated"), list) else []
             sources = merge_grounded_sources(rss_items, citations, llm_sources, default_bias=bias)
@@ -496,7 +499,14 @@ class EurUsdSpotAnalysisService:
             c_vs_d = (
                 f"{tribunal['verdict']['ruling']} | Invalidación: {tribunal['verdict']['invalidation_condition']}"
             )
-            s_text = self._render_tribunal_markdown(price_info, tech, tribunal, calendar_events)
+            s_text = self._render_tribunal_markdown(price_info, tech, tribunal, calendar_events, bank_data=bank_data)
+
+        daily_guide = compute_daily_guide(
+            current_price=current_price,
+            pdh=pdh,
+            pdl=pdl,
+            calendar_events=calendar_events,
+        )
 
         report = {
             "meta": {
@@ -511,6 +521,8 @@ class EurUsdSpotAnalysisService:
             "bias": bias,
             "confidence": confidence,
             "tribunal": tribunal,
+            "daily_guide": daily_guide,
+            "bank_consensus": bank_data,
             "calendar_today": calendar_events,
             "fundamental": fund_points,
             "technical": tech,
@@ -582,6 +594,7 @@ class EurUsdSpotAnalysisService:
         tech: Dict[str, Any],
         tribunal: Dict[str, Any],
         calendar_events: List[Dict[str, Any]],
+        bank_data: Optional[Dict[str, Any]] = None,
     ) -> str:
         verdict = tribunal.get("verdict") or {}
         thesis = tribunal.get("thesis") or {}
@@ -628,4 +641,6 @@ class EurUsdSpotAnalysisService:
                     f"- `{ev.get('time_utc')}` **{ev.get('currency')}** [{ev.get('impact')}] {ev.get('title')} "
                     f"(Est: {ev.get('forecast') or '-'}, Prev: {ev.get('previous') or '-'})"
                 )
+        if bank_data:
+            lines.extend(["", format_bank_consensus_for_prompt(bank_data)])
         return "\n".join(lines)

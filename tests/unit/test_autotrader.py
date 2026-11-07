@@ -179,7 +179,7 @@ def test_autotrader_rejection_backoff_and_persistence(monkeypatch, tmp_path):
         status = svc.status()
         assert "Trading algorítmico deshabilitado" in (status["last_rejection"] or "")
         assert "EURUSD" in svc._symbol_cooldowns
-        assert "XAUUSD" in svc._symbol_cooldowns
+        assert "USDJPY" in svc._symbol_cooldowns
 
         await svc.stop()
         assert svc.should_autostart() is False

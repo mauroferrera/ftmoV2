@@ -63,10 +63,11 @@ flowchart TD
 
 | Módulo | Capa | Responsabilidad | ¿Hace I/O? |
 | :--- | :--- | :--- | :---: |
-| `core/eurusd_spot_analysis_schema.py` | `core/` | Validación estricta del JSON, normalización del bloque `tribunal`, deduplicación de URLs y retrocompatibilidad con runs históricos. | **No (100% puro)** |
+| `core/eurusd_spot_analysis_schema.py` | `core/` | Validación estricta del JSON, normalización del bloque `tribunal`, `bank_consensus`, deduplicación de URLs y retrocompatibilidad con runs históricos. | **No (100% puro)** |
+| `core/bank_consensus.py` | `core/` | Meta-análisis cuantitativo de los top 10 bancos y analistas senior (distribución de sesgos, techo institucional 100d SMA, zonas de fade, clusters de stop loss e imanes de liquidez). | **No (100% puro)** |
 | `core/eurusd_spot_tech_calc.py` | `core/` | Cálculo de `SMA`, `EMA`, `RSI14`, `MACD (12,26,9)`, resumen de microestructura SMC (`summarize_smc_and_structure`) y motor determinista del Tribunal (`build_deterministic_tribunal`). | **No (100% puro)** |
 | `api/services/eurusd_web_intel.py` | `api/services/` | Descarga paralela (`ThreadPoolExecutor`) de RSS y calendario macro, invocación HTTP a Gemini con `google_search` y fusión verificada de fuentes (`merge_grounded_sources`). | **Sí (HTTP/REST)** |
-| `api/services/eurusd_spot_analysis_service.py` | `api/services/` | Orquestación extremo a extremo (MT5 $\rightarrow$ Web $\rightarrow$ Tribunal $\rightarrow$ SQLite). | **Sí (MT5 + SQLite)** |
+| `api/services/eurusd_spot_analysis_service.py` | `api/services/` | Orquestación extremo a extremo (MT5 $\rightarrow$ Web $\rightarrow$ Tribunal $\rightarrow$ Meta-Análisis Bancario $\rightarrow$ SQLite). | **Sí (MT5 + SQLite)** |
 | `api/services/setup_eval.py` | `api/services/` | Cruza el setup SMC de `EURUSD` (`BUY`/`SELL`) contra el último veredicto del Tribunal en `macro_confluence`. | **Sí (lectura SQLite)** |
 
 ---
@@ -155,7 +156,50 @@ python scripts/run_eurusd_spot_analysis.py --force
 | Método | Ruta | Descripción |
 | :--- | :--- | :--- |
 | `POST` | `/api/analysis/eurusd-spot/run?force=true` | Ejecuta el pipeline completo en vivo (MT5 + RSS + Calendario + Gemini Google Search) y guarda en `trading.db`. |
-| `GET` | `/api/analysis/eurusd-spot/latest` | Devuelve el último reporte completo incluyendo `tribunal`, `calendar_today`, `technical.smc_summary` y `sources`. |
+| `GET` | `/api/analysis/eurusd-spot/latest` | Devuelve el último reporte completo incluyendo `tribunal`, `bank_consensus`, `calendar_today`, `technical.smc_summary` y `sources`. |
 | `GET` | `/api/analysis/eurusd-spot/history?limit=20` | Lista las ejecuciones guardadas con su `verdict_status`, `bias`, `confidence` y `price_current`. |
 | `GET` | `/api/analysis/eurusd-spot/by-run?run_key=YYYY-MM-DD_HH` | Recupera el reporte íntegro de una sesión específica. |
+| `GET` | `/api/analysis/eurusd-spot/bank-consensus` | Devuelve el meta-análisis estructurado y los 10 análisis de bancos y analistas senior (distribución, techo institucional, zonas de venta, cluster de stops e imán de liquidez). |
+| `GET` | `/api/analysis/eurusd-spot/daily-guide` | Devuelve la **Guía Operativa Diaria** en tiempo real: semáforo de noticias, niveles maestros (Techo PDH, Medio de Camino 50%, Piso PDL), diagnóstico de ubicación y calculadora de lotaje. |
+
+---
+
+## 5. Meta-Análisis de Consenso Bancario Institucional (Top 10)
+
+Integrado a partir del módulo puro `core/bank_consensus.py` y el almacén `data/eurusd_bank_analyses.json`, este subsistema cataloga las tesis vigentes de las 10 firmas más influyentes del mercado de divisas (ING, Danske Bank, Rabobank, MUFG, Scotiabank, Goldman Sachs, Société Générale, FXStreet Tech Desk, DailyFX/IG y ActionForex).
+
+### Métricas de Convicción Agrupadas
+1. **Distribución de Sesgo:** 60% Bajista, 30% Neutral/Rango, 10% Alcista.
+2. **Techo Institucional (100d SMA):** `1.1280 - 1.1290` (confluencia unánime de freno técnico en D1).
+3. **Zona de Venta Bancaria (Fade the Rally):** `1.1220 - 1.1260` (donde las mesas de dinero buscan posiciones cortas).
+4. **Cluster de Stops de los Analistas (Zona de Sweep):** `1.1295 - 1.1300` (imán para barridas de liquidez institucional previa a giros).
+5. **Imán de Liquidez / Target Bajista:** `1.1100 - 1.1150` (primer objetivo estructural masivo).
+
+---
+
+## 6. Guía Operativa Diaria (Copiloto Consultivo para Decisiones Manuales)
+
+Diseñado a través de `core/daily_guide.py`, este módulo provee una pestaña dedicada en la interfaz (`🎯 Guía del Día`) que responde al instante qué se espera de la sesión actual:
+1. **Semáforo Macro:** Luz Verde para condiciones de rango normal vs. Alerta por publicaciones de alto impacto con ventana horaria UTC.
+2. **Mapa de Precios (Los 3 Niveles Maestros):**
+   - **Techo:** `PDH` (Máximo de ayer) + distancia en pips.
+   - **Medio del Camino (Take Profit):** `50% Equilibrium` exacto entre el máximo y el mínimo.
+   - **Piso:** `PDL` (Mínimo de ayer) + distancia en pips.
+3. **Diagnóstico de Ubicación:** Informa si el precio cotiza en zona de venta (cerca del techo), zona de compra (cerca del piso) o en el centro (zona muerta donde se recomienda no entrar).
+4. **Calculadora para Cuenta Propia:** Sizing automático para cuentas de $2,000 con tope diario de $100 ($45 de riesgo por operación, 2 operaciones máximas).
+
+---
+
+## 7. Herramientas Visuales Interactivas: Fibonacci Pro y Cajas SMC (OB / FVG)
+
+Integrado en el visor gráfico principal (`static/index.html` sobre TradingView Lightweight Charts + Canvas HiDPI vectorial superpuesto):
+1. **Retroceso de Fibonacci Interactivo:**
+   - Modo Automático (`Fib OTE Auto`) y Manual con imán magnético a mechas (`High`/`Low`).
+   - Nodos interactivos de anclaje (`P1 100%` y `P2 0%`) con arrastre suave en vivo.
+   - Niveles institucionales: `0.50 Equilibrium`, `0.618 Golden Pocket`, `0.705 OTE Sweet Spot`, `0.786 Deep Retracement`, Extensiones Take Profit `-0.272 (TP1)` y `-0.618 (TP2)`.
+   - Etiquetas compactas posicionadas en el margen derecho exterior para no tapar las velas.
+2. **Cajas SMC (Order Blocks y Fair Value Gaps):**
+   - Capa interactiva (`📦 Cajas OB / FVG`) que inicia apagada por defecto para mantener el gráfico limpio.
+   - Mapea cajas sombreadas institucionales en tiempo real para todos los activos y pares de divisas (`OB+`, `OB-`, `FVG+`, `FVG-`).
+   - Detección automática de confluencia: si el bolsillo OTE de Fibonacci coincide con una caja viva de OB o FVG, el borde se ilumina en dorado con el distintivo `🎯 OB + OTE` o `🎯 FVG + OTE`.
 | `GET` | `/api/chart/setup-eval?symbol=EURUSD` | Incluye el bloque `macro_confluence` enriquecido con `verdict_status`, `recommended_risk_pct` y `ruling`. |

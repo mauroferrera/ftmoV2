@@ -471,6 +471,27 @@
       border-left: 3px solid var(--warn);
     }
 
+    .bank-card {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 0.65rem 0.85rem;
+      background: rgba(15, 23, 42, 0.45);
+      font-size: 0.78rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      transition: border-color 0.15s ease;
+    }
+    .bank-card:hover {
+      border-color: rgba(59, 130, 246, 0.45);
+    }
+    .bank-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
     .tribunal-points {
       list-style: none;
       display: flex;
@@ -1280,10 +1301,15 @@
     }
 
     .smc-tag-pill.off {
-      opacity: 0.38;
-      background: transparent;
-      border-color: transparent;
-      text-decoration: line-through;
+      opacity: 0.55;
+      background: rgba(255, 255, 255, 0.02);
+      border-color: rgba(255, 255, 255, 0.08);
+      color: var(--text-dim);
+    }
+
+    .smc-tag-pill.off .smc-dot {
+      opacity: 0.35;
+      filter: grayscale(1);
     }
 
     .smc-dot {
@@ -2020,13 +2046,22 @@
         </div>
 
         <div class="chart-actions">
+          <button class="btn-icon" id="btn-draw-fib" onclick="toggleFibManualDrawing()" title="Herramienta de Retroceso de Fibonacci manual (haz clic en 2 puntos del gráfico)">📐 Fib Manual</button>
+          <button class="btn-icon" id="btn-fib-labels" onclick="cycleFibLabelMode()" style="display:none;" title="Cambiar ubicación de los cartelitos para no tapar las velas (Fuera Derecha / Fuera Izquierda / Ocultos)">🏷️ Carteles: Fuera Der</button>
+          <button class="btn-icon" id="btn-invert-fib" onclick="invertFibDrawing()" style="display:none;" title="Invertir dirección del Fibonacci (0% ↔ 100%)">⇄ Invertir</button>
+          <button class="btn-icon" id="btn-clear-fib" onclick="clearFibDrawing()" style="display:none;" title="Borrar líneas de Fibonacci manual">✕ Borrar Fib</button>
           <button class="btn-icon" id="btn-reset-chart">⤢ Auto-fit</button>
           <button class="btn-icon" id="btn-refresh-data">⟳ Refrescar</button>
         </div>
       </div>
 
       <!-- Chart Viewport -->
-      <div class="chart-viewport">
+      <div class="chart-viewport" id="chart-viewport-container">
+        <canvas id="chart-custom-canvas" style="position:absolute; top:0; left:0; pointer-events:none; z-index:6;"></canvas>
+        <div id="fib-hint-banner" style="display:none; position:absolute; top:36px; left:50%; transform:translateX(-50%); z-index:30; background:rgba(18,26,43,0.95); border:1px solid #38bdf8; border-radius:6px; padding:0.4rem 0.9rem; font-size:0.75rem; color:#f1f5f9; box-shadow:0 4px 18px rgba(0,0,0,0.6); pointer-events:none; align-items:center; gap:0.5rem;">
+          <span style="color:#38bdf8; font-weight:700;">📐 Fibonacci Pro:</span>
+          <span id="fib-hint-msg">Haz clic en el 1º punto (se imanta a la mecha más cercana)</span>
+        </div>
         <div class="chart-overlay-legend" id="chart-legend">
           <span>O: <b id="leg-open">—</b></span>
           <span>H: <b id="leg-high">—</b></span>
@@ -2034,6 +2069,8 @@
           <span>C: <b id="leg-close">—</b></span>
           <span id="leg-zone-tag" style="display:none; padding-left:0.5rem; border-left:1px solid rgba(255,255,255,0.12); color:var(--primary);"></span>
           <span id="leg-htf-zone-tag" style="display:none; padding-left:0.5rem; border-left:1px solid rgba(255,255,255,0.12); color:#a855f7;"></span>
+          <span id="leg-fib-tag" style="display:none; padding-left:0.5rem; border-left:1px solid rgba(255,255,255,0.12); color:#06b6d4;"></span>
+          <span id="leg-confluence-tag" style="display:none; padding-left:0.5rem; border-left:1px solid rgba(255,255,255,0.12); color:#f59e0b;"></span>
         </div>
         <div id="tv-chart"></div>
       </div>
@@ -2041,37 +2078,49 @@
       <!-- SMC Markers Bar (Capas interactivas clicables) -->
       <div class="smc-markers-bar">
         <span style="font-size:0.68rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">Capas:</span>
-        <button type="button" class="smc-tag-pill" id="layer-btn-plan" onclick="toggleChartLayer('plan')" title="Mostrar / ocultar líneas de Entrada, Stop Loss, Take Profit y Zona activa del Setup">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-plan" onclick="toggleChartLayer('plan')" title="Mostrar / ocultar líneas de Entrada, Stop Loss, Take Profit y Zona activa del Setup">
           <div class="smc-dot" style="background:#38bdf8;"></div>
           <span>Plan Setup</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-bull_smc" onclick="toggleChartLayer('bull_smc')" title="Mostrar / ocultar FVG+ y Order Blocks alcistas (OB+)">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-smc_boxes" onclick="toggleChartLayer('smc_boxes')" title="El Fibonacci no se opera solo; se busca confluencia. La mejor entrada ocurre cuando la zona 0.618 – 0.705 coincide exactamente con una caja de Order Block (OB) o FVG en la misma zona horaria (Londres o NY Killzone).">
+          <div class="smc-dot" style="background:#a855f7;"></div>
+          <span>📦 Cajas OB / FVG</span>
+        </button>
+        <button type="button" class="smc-tag-pill off" id="layer-btn-bull_smc" onclick="toggleChartLayer('bull_smc')" title="Mostrar / ocultar FVG+ y Order Blocks alcistas (OB+)">
           <div class="smc-dot" style="background:#00e599;"></div>
           <span>Bullish FVG/OB</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-bear_smc" onclick="toggleChartLayer('bear_smc')" title="Mostrar / ocultar FVG- y Order Blocks bajistas (OB-)">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-bear_smc" onclick="toggleChartLayer('bear_smc')" title="Mostrar / ocultar FVG- y Order Blocks bajistas (OB-)">
           <div class="smc-dot" style="background:#ff3b69;"></div>
           <span>Bearish FVG/OB</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-pd_levels" onclick="toggleChartLayer('pd_levels')" title="Mostrar / ocultar niveles PDH / PDL del día anterior y barridos de liquidez (Sweeps)">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-pd_levels" onclick="toggleChartLayer('pd_levels')" title="Mostrar / ocultar niveles PDH / PDL del día anterior y barridos de liquidez (Sweeps)">
           <div class="smc-dot" style="background:#f59e0b;"></div>
           <span>PDH/PDL Diario</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-pw_levels" onclick="toggleChartLayer('pw_levels')" title="Mostrar / ocultar niveles PWH / PWL de la semana anterior y zona HTF">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-pw_levels" onclick="toggleChartLayer('pw_levels')" title="Mostrar / ocultar niveles PWH / PWL de la semana anterior y zona HTF">
           <div class="smc-dot" style="background:#a855f7;"></div>
           <span>PWH/PWL Semanal</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-pm_levels" onclick="toggleChartLayer('pm_levels')" title="Mostrar / ocultar niveles PMH / PML del mes anterior">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-pm_levels" onclick="toggleChartLayer('pm_levels')" title="Mostrar / ocultar niveles PMH / PML del mes anterior">
           <div class="smc-dot" style="background:#facc15;"></div>
           <span>PMH/PML Mensual</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-swings" onclick="toggleChartLayer('swings')" title="Mostrar / ocultar últimos Swings High (SH) y Low (SL) estructurales">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-swings" onclick="toggleChartLayer('swings')" title="Mostrar / ocultar últimos Swings High (SH) y Low (SL) estructurales">
           <div class="smc-dot" style="background:#64748b;"></div>
           <span>Swings</span>
         </button>
-        <button type="button" class="smc-tag-pill" id="layer-btn-positions" onclick="toggleChartLayer('positions')" title="Mostrar / ocultar tus posiciones abiertas en MT5 sobre el gráfico">
+        <button type="button" class="smc-tag-pill off" id="layer-btn-positions" onclick="toggleChartLayer('positions')" title="Mostrar / ocultar tus posiciones abiertas en MT5 sobre el gráfico">
           <div class="smc-dot" style="background:#eab308;"></div>
           <span>Posiciones</span>
+        </button>
+        <button type="button" class="smc-tag-pill off" id="layer-btn-fib_ote" onclick="toggleChartLayer('fib_ote')" title="Mostrar / ocultar Retroceso de Fibonacci automático sobre el impulso principal (OTE 61.8% · 70.5% · 78.6%)">
+          <div class="smc-dot" style="background:#06b6d4;"></div>
+          <span>Fib OTE Auto</span>
+        </button>
+        <button type="button" class="smc-tag-pill off" id="layer-btn-sessions" onclick="toggleChartLayer('sessions')" title="Mostrar / ocultar sombreado discreto de Zonas Horarias (Asia, Londres Killzone y Nueva York Killzone en UTC)">
+          <div class="smc-dot" style="background:#38bdf8; opacity:0.75;"></div>
+          <span>Zonas Horarias</span>
         </button>
         <span style="margin-left:auto; color:var(--text-dim); white-space:nowrap;" id="chart-bars-count">120 velas</span>
       </div>
@@ -2299,7 +2348,8 @@
         <div style="display:flex; align-items:center; gap:0.8rem;">
           <button class="btn btn-primary" id="btn-run-eurusd-analysis" type="button" onclick="triggerRunEurusdAnalysis()" style="font-size:0.75rem; padding:0.35rem 0.65rem; border-radius:4px; background:var(--accent, #3b82f6); color:#fff; border:none; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:0.3rem;" title="Ejecutar Tribunal en vivo (MT5 + RSS + Google Search + Gemini)">⚡ Generar Ahora</button>
           <div class="eurusd-modal-tabs">
-            <button class="eurusd-tab-btn active" data-tab="latest" type="button">Último Análisis</button>
+            <button class="eurusd-tab-btn active" data-tab="daily-guide" type="button">🎯 Guía del Día</button>
+            <button class="eurusd-tab-btn" data-tab="latest" type="button">Último Análisis</button>
             <button class="eurusd-tab-btn" data-tab="history" type="button">Historial (Runs)</button>
           </div>
           <button class="btn-icon" id="btn-close-eurusd" type="button" onclick="closeEurusdModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer; line-height:1; padding:0 0.4rem;" title="Cerrar">&times;</button>
@@ -2307,8 +2357,108 @@
       </div>
 
       <div class="eurusd-modal-body">
+        <!-- Tab: Guía del Día (Copiloto de Decisión) -->
+        <div id="eurusd-tab-daily-guide" style="display:flex; flex-direction:column; gap:1rem;">
+          <!-- Card de Semáforo y Veredicto Ejecutivo -->
+          <div class="tribunal-banner" id="guide-traffic-banner" style="background:rgba(15,23,42,0.85); border-left:4px solid var(--primary); padding:0.9rem 1.1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+              <strong style="font-size:0.92rem; color:var(--text-main);" id="guide-traffic-title">🚦 Semáforo del Día</strong>
+              <span class="eurusd-badge" id="guide-traffic-badge">Cargando...</span>
+            </div>
+            <div style="font-size:0.82rem; color:var(--text-dim); margin-top:0.35rem;" id="guide-traffic-msg">—</div>
+          </div>
+
+          <!-- Mapa de Precios: Techo, Medio de Camino (50%) y Piso -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">🗺️ Mapa de Niveles del Día (EUR/USD)</span>
+              <span class="eurusd-badge" id="guide-range-badge">Rango: — pips</span>
+            </div>
+            <div class="eurusd-section-body" id="guide-levels-body">
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:0.75rem;">
+                <!-- Techo PDH -->
+                <div class="eurusd-card" style="border-top:3px solid var(--bear);">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span class="eurusd-card-label">🔴 TECHO (Máximo de Ayer - PDH)</span>
+                    <span class="eurusd-badge bear" id="guide-dist-pdh">—</span>
+                  </div>
+                  <div class="eurusd-card-value" id="guide-pdh-val" style="color:var(--bear); font-size:1.2rem;">—</div>
+                  <div style="font-size:0.72rem; color:var(--text-muted);">Zona de Venta Institucional / Barrido</div>
+                </div>
+
+                <!-- Medio del Camino 50% -->
+                <div class="eurusd-card" style="border-top:3px solid var(--accent, #3b82f6); background:rgba(59,130,246,0.06);">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span class="eurusd-card-label">🏁 MEDIO DE CAMINO (50% Fair Value)</span>
+                    <span class="eurusd-badge bull" id="guide-dist-eq">—</span>
+                  </div>
+                  <div class="eurusd-card-value" id="guide-eq-val" style="color:var(--accent, #38bdf8); font-size:1.2rem;">—</div>
+                  <div style="font-size:0.72rem; color:var(--text-muted); font-weight:600;">🎯 Tu Objetivo de Take Profit</div>
+                </div>
+
+                <!-- Piso PDL -->
+                <div class="eurusd-card" style="border-top:3px solid var(--bull);">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span class="eurusd-card-label">🟢 PISO (Mínimo de Ayer - PDL)</span>
+                    <span class="eurusd-badge bull" id="guide-dist-pdl">—</span>
+                  </div>
+                  <div class="eurusd-card-value" id="guide-pdl-val" style="color:var(--bull); font-size:1.2rem;">—</div>
+                  <div style="font-size:0.72rem; color:var(--text-muted);">Zona de Compra Institucional / Barrido</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Diagnóstico de Ubicación y Plan de Acción -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">🧭 Ubicación Actual y Plan de Acción</span>
+              <span class="eurusd-badge" id="guide-location-badge">—</span>
+            </div>
+            <div class="eurusd-section-body" style="padding:0.95rem 1.1rem; background:rgba(7,10,16,0.5); border-radius:7px; border:1px solid var(--border);">
+              <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
+                <span style="font-size:1.15rem;" id="guide-action-icon">🎯</span>
+                <strong style="font-size:0.92rem; color:var(--text-main);" id="guide-action-headline">Analizando mercado...</strong>
+              </div>
+              <div style="font-size:0.83rem; line-height:1.55; color:var(--text-main);" id="guide-action-plan">—</div>
+            </div>
+          </div>
+
+          <!-- Calculadora Rápida Cuenta Propia ($2,000 / $100 Tope) -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">💰 Gestión para Cuenta Propia ($2,000 · Tope $100/Día)</span>
+              <span class="eurusd-badge warn">Máx 2 Trades</span>
+            </div>
+            <div class="eurusd-section-body" id="guide-risk-body">
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.6rem;">
+                <div class="bank-card">
+                  <div style="color:var(--text-muted); font-size:0.72rem;">RIESGO POR TRADE</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--warn);">$45 USD</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">2 balas máx para el tope de $100</div>
+                </div>
+                <div class="bank-card">
+                  <div style="color:var(--text-muted); font-size:0.72rem;">SL TÉCNICO SUGERIDO</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--text-main);" id="guide-calc-sl">18 pips</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Detrás del PDH o PDL</div>
+                </div>
+                <div class="bank-card">
+                  <div style="color:var(--text-muted); font-size:0.72rem;">LOTAJE EXACTO MT5</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--accent, #38bdf8);" id="guide-calc-lot">0.25 lotes</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Respeta estrictamente los $45</div>
+                </div>
+                <div class="bank-card">
+                  <div style="color:var(--text-muted); font-size:0.72rem;">GANANCIA ESPERADA (50%)</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--bull);" id="guide-calc-win">+$80 a +$95 USD</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Al llegar al medio de camino</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tab: Último Análisis -->
-        <div id="eurusd-tab-latest" style="display:flex; flex-direction:column; gap:1rem;">
+        <div id="eurusd-tab-latest" style="display:none; flex-direction:column; gap:1rem;">
           <!-- Top KPI Grid -->
           <div class="eurusd-grid" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));">
             <div class="eurusd-card">
@@ -2351,6 +2501,17 @@
                   <div style="font-size:0.8rem; color:var(--text-muted);">Sin antítesis cargada</div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Consenso Bancario Institucional (Meta-Análisis Top 10) -->
+          <div class="eurusd-section" id="eurusd-bank-consensus-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">🏛️ Consenso Institucional Bancario (Meta-Análisis Top 10)</span>
+              <span class="eurusd-badge bear" id="eurusd-bank-consensus-badge">60% Bajista</span>
+            </div>
+            <div class="eurusd-section-body" id="eurusd-bank-consensus-body">
+              <div style="font-size:0.8rem; color:var(--text-muted);">Cargando meta-análisis bancario…</div>
             </div>
           </div>
 
@@ -2475,15 +2636,39 @@
       lastAnalysis: null,
       openPositions: [],
       chartLayers: {
-        plan: true,
-        bull_smc: true,
-        bear_smc: true,
-        pd_levels: true,
-        pw_levels: true,
-        pm_levels: true,
-        swings: true,
-        positions: true,
+        plan: false,
+        smc_boxes: false,
+        bull_smc: false,
+        bear_smc: false,
+        pd_levels: false,
+        pw_levels: false,
+        pm_levels: false,
+        swings: false,
+        positions: false,
+        fib_ote: false,
+        sessions: false,
       },
+      fibLabelMode: 'right',
+      currentFibPoints: null,
+      fibDragging: {
+        active: false,
+        node: null,
+        source: null,
+      },
+      fibHoveredNode: null,
+      manualFib: {
+        active: false,
+        step: 0,
+        p1: null,
+        idx1: null,
+        p2: null,
+        idx2: null,
+        hoverPrice: null,
+        hoverIdx: null,
+        snapPoint: null,
+        autoInverted: false,
+      },
+      manualFibLines: [],
       pendingTrade: null,
       accountsCount: 0,
       setupKey: null
@@ -2723,9 +2908,12 @@
         visible: false,
       });
 
-      // Actualización de leyenda OHLC al mover el cursor
+      // Actualización de leyenda OHLC al mover el cursor + Vista previa interactiva de Fibonacci
       state.chartInstance.subscribeCrosshairMove(param => {
         const dec = getSymbolDecimals(state.symbol);
+        if (state.manualFib && state.manualFib.active) {
+          updateFibHoverPreview(param);
+        }
         if (!param || !param.time || !param.seriesData || !param.seriesData.get(state.candleSeries)) {
           if (state.cachedCandles.length) {
             const last = state.cachedCandles[state.cachedCandles.length - 1];
@@ -2745,6 +2933,20 @@
         }
       });
 
+      // Sincronizar el lienzo vectorial (Zonas Horarias + Fibonacci Pro) al hacer zoom/scroll/resize
+      state.chartInstance.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        requestCanvasRedraw();
+      });
+
+      // Interacción de arrastrar nodos de Fibonacci (P1 / P2)
+      container.addEventListener('mousedown', onFibMouseDown, { capture: true });
+      window.addEventListener('mousemove', onFibMouseMove, { capture: true });
+      window.addEventListener('mouseup', onFibMouseUp, { capture: true });
+
+      ['wheel', 'touchmove', 'dblclick'].forEach(evtName => {
+        container.addEventListener(evtName, () => requestCanvasRedraw(), { passive: true });
+      });
+
       // Resize observer
       const ro = new ResizeObserver(entries => {
         for (const entry of entries) {
@@ -2753,11 +2955,1271 @@
               width: entry.contentRect.width,
               height: entry.contentRect.height,
             });
+            requestCanvasRedraw();
           }
         }
       });
       ro.observe(container);
+
+      // Clic interactivo en el gráfico (para trazar Fibonacci manual con imán a mechas)
+      state.chartInstance.subscribeClick(param => {
+        handleChartClick(param);
+      });
     }
+
+    // --- Motor Vectorial en Canvas: Zonas Horarias (Killzones) & Fibonacci Pro ---
+    const FIBO_LEVELS_DEF = [
+      { ratio: 1.0,    short: '1.0 (100%)',    color: '#94a3b8', lineWidth: 1.2, dash: [],     priority: 1 },
+      { ratio: 0.786,  short: '0.786',         color: '#f43f5e', lineWidth: 1.0, dash: [3, 3], priority: 2 },
+      { ratio: 0.705,  short: '0.705 OTE',     color: '#a855f7', lineWidth: 1.8, dash: [],     priority: 1 },
+      { ratio: 0.618,  short: '0.618 Golden',  color: '#f59e0b', lineWidth: 1.5, dash: [],     priority: 1 },
+      { ratio: 0.500,  short: '0.50 EQ',       color: '#06b6d4', lineWidth: 1.3, dash: [5, 4], priority: 1 },
+      { ratio: 0.382,  short: '0.382',         color: 'rgba(148, 163, 184, 0.55)', lineWidth: 1.0, dash: [2, 3], priority: 3 },
+      { ratio: 0.236,  short: '0.236',         color: 'rgba(148, 163, 184, 0.40)', lineWidth: 1.0, dash: [2, 3], priority: 3 },
+      { ratio: 0.0,    short: '0.0 (0%)',      color: '#94a3b8', lineWidth: 1.2, dash: [],     priority: 1 },
+      { ratio: -0.272, short: '-0.272 TP1',    color: '#00e599', lineWidth: 1.3, dash: [4, 3], priority: 1 },
+      { ratio: -0.618, short: '-0.618 TP2',    color: '#00e599', lineWidth: 1.3, dash: [4, 3], priority: 2 },
+    ];
+
+    let _canvasRafId = null;
+    function requestCanvasRedraw() {
+      if (_canvasRafId != null) return;
+      _canvasRafId = window.requestAnimationFrame(() => {
+        _canvasRafId = null;
+        renderCustomChartCanvas();
+      });
+    }
+
+    // Imán inteligente: si el cursor se acerca a la mecha High o Low de una vela, se ancla con precisión
+    function resolveSnapPoint(paramOrPos) {
+      if (!paramOrPos || !state.candleSeries || !state.chartInstance) return null;
+      const pt = paramOrPos.point ? paramOrPos.point : (paramOrPos.x != null && paramOrPos.y != null ? paramOrPos : null);
+      if (!pt) return null;
+      const rawPrice = state.candleSeries.coordinateToPrice(pt.y);
+      if (rawPrice == null || isNaN(rawPrice) || rawPrice <= 0) return null;
+
+      const ts = state.chartInstance.timeScale();
+      let logicalIdx = paramOrPos.logical != null ? Math.round(paramOrPos.logical) : null;
+      if (logicalIdx == null && ts.coordinateToLogical) {
+        const cLog = ts.coordinateToLogical(pt.x);
+        if (cLog != null) logicalIdx = Math.round(cLog);
+      }
+      const candles = state.cachedCandles || [];
+      if (!candles.length) {
+        return { price: rawPrice, idx: 0, snapped: false, kind: null };
+      }
+
+      const clampedIdx = Math.max(0, Math.min(candles.length - 1, logicalIdx != null ? logicalIdx : candles.length - 1));
+      // Buscar la mecha (High o Low) más cercana en una ventana de ±2 velas (radio magnético de 24px)
+      let bestSnap = null;
+      let bestDistPx = 24;
+
+      for (let i = Math.max(0, clampedIdx - 2); i <= Math.min(candles.length - 1, clampedIdx + 2); i++) {
+        const c = candles[i];
+        const xBar = ts.logicalToCoordinate(i);
+        if (xBar == null || Math.abs(xBar - pt.x) > 30) continue;
+
+        const yHigh = state.candleSeries.priceToCoordinate(Number(c.high));
+        if (yHigh != null) {
+          const dH = Math.hypot(xBar - pt.x, yHigh - pt.y);
+          if (dH < bestDistPx) {
+            bestDistPx = dH;
+            bestSnap = { price: Number(c.high), idx: i, snapped: true, kind: 'HIGH' };
+          }
+        }
+        const yLow = state.candleSeries.priceToCoordinate(Number(c.low));
+        if (yLow != null) {
+          const dL = Math.hypot(xBar - pt.x, yLow - pt.y);
+          if (dL < bestDistPx) {
+            bestDistPx = dL;
+            bestSnap = { price: Number(c.low), idx: i, snapped: true, kind: 'LOW' };
+          }
+        }
+      }
+
+      if (bestSnap) return bestSnap;
+      return {
+        price: rawPrice,
+        idx: logicalIdx != null ? logicalIdx : clampedIdx,
+        snapped: false,
+        kind: null,
+      };
+    }
+
+    // Coordenadas del cursor dentro del área del gráfico
+    function getChartMousePos(e) {
+      const container = $('tv-chart');
+      if (!container) return null;
+      const rect = container.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    }
+
+    // Detección de colisión con los nodos P1 (100%) o P2 (0%)
+    function checkFibNodeHit(pos) {
+      if (!pos || !state.currentFibPoints) return null;
+      const { x1, y1, x2, y2 } = state.currentFibPoints;
+      const hitRadius = 16;
+
+      if (x1 != null && y1 != null) {
+        const d1 = Math.hypot(pos.x - x1, pos.y - y1);
+        if (d1 <= hitRadius) return 'p1';
+      }
+      if (x2 != null && y2 != null) {
+        const d2 = Math.hypot(pos.x - x2, pos.y - y2);
+        if (d2 <= hitRadius) return 'p2';
+      }
+      return null;
+    }
+
+    // Inicio de arrastre de nodo Fibonacci (P1 o P2) con el mouse
+    function onFibMouseDown(e) {
+      if (state.manualFib && state.manualFib.active) return;
+      if (!state.currentFibPoints) return;
+
+      const pos = getChartMousePos(e);
+      if (!pos) return;
+
+      const hit = checkFibNodeHit(pos);
+      if (!hit) return;
+
+      // Si el nodo provenía de Auto-Fib, se convierte automáticamente a manual para edición personalizada
+      if (state.currentFibPoints.source === 'auto') {
+        state.manualFib.p1 = state.currentFibPoints.p1;
+        state.manualFib.idx1 = state.currentFibPoints.idx1;
+        state.manualFib.p2 = state.currentFibPoints.p2;
+        state.manualFib.idx2 = state.currentFibPoints.idx2;
+        state.manualFib.active = false;
+        state.manualFib.step = 0;
+
+        state.chartLayers.fib_ote = false;
+        const btnAuto = $('layer-btn-fib_ote');
+        if (btnAuto) btnAuto.classList.add('off');
+        updateFibActionButtons();
+      }
+
+      state.fibDragging.active = true;
+      state.fibDragging.node = hit;
+      state.fibDragging.source = 'manual';
+
+      const chartEl = $('tv-chart');
+      if (chartEl) chartEl.style.cursor = 'grabbing';
+
+      e.stopPropagation();
+      e.preventDefault();
+      requestCanvasRedraw();
+    }
+
+    // Movimiento continuo del mouse con imán magnético a mechas
+    function onFibMouseMove(e) {
+      const pos = getChartMousePos(e);
+      if (!pos) return;
+
+      if (state.fibDragging && state.fibDragging.active) {
+        const node = state.fibDragging.node;
+        const snap = resolveSnapPoint(pos);
+        if (snap && snap.price != null && !isNaN(snap.price) && snap.price > 0) {
+          if (node === 'p1') {
+            state.manualFib.p1 = snap.price;
+            state.manualFib.idx1 = snap.idx;
+          } else if (node === 'p2') {
+            state.manualFib.p2 = snap.price;
+            state.manualFib.idx2 = snap.idx;
+          }
+          state.manualFib.snapPoint = snap;
+          updateFibActionButtons();
+          requestCanvasRedraw();
+        }
+        e.stopPropagation();
+        e.preventDefault();
+        return;
+      }
+
+      if (state.manualFib && state.manualFib.active) return;
+      const hit = checkFibNodeHit(pos);
+      const chartEl = $('tv-chart');
+
+      if (hit !== state.fibHoveredNode) {
+        state.fibHoveredNode = hit;
+        if (chartEl) {
+          chartEl.style.cursor = hit ? 'grab' : '';
+        }
+        requestCanvasRedraw();
+      }
+    }
+
+    // Soltar el mouse: fijar el nodo en su nueva posición
+    function onFibMouseUp(e) {
+      if (state.fibDragging && state.fibDragging.active) {
+        state.fibDragging.active = false;
+        state.fibDragging.node = null;
+        state.fibDragging.source = null;
+        if (state.manualFib) state.manualFib.snapPoint = null;
+
+        const chartEl = $('tv-chart');
+        if (chartEl) chartEl.style.cursor = state.fibHoveredNode ? 'grab' : '';
+
+        updateFibActionButtons();
+        requestCanvasRedraw();
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }
+
+    function updateFibHoverPreview(param) {
+      if (!state.manualFib || !state.manualFib.active) return;
+      const snap = resolveSnapPoint(param);
+      state.manualFib.snapPoint = snap;
+      if (snap && state.manualFib.step === 2) {
+        state.manualFib.hoverPrice = snap.price;
+        state.manualFib.hoverIdx = snap.idx;
+      }
+      requestCanvasRedraw();
+    }
+
+    function toggleFibManualDrawing() {
+      if (state.manualFib && state.manualFib.active) {
+        cancelFibDrawing();
+        return;
+      }
+      state.manualFib.active = true;
+      state.manualFib.step = 1;
+      state.manualFib.hoverPrice = null;
+      state.manualFib.hoverIdx = null;
+      state.manualFib.snapPoint = null;
+      const btn = $('btn-draw-fib');
+      if (btn) {
+        btn.classList.add('is-busy');
+        btn.textContent = '❌ Cancelar Fib';
+      }
+      const banner = $('fib-hint-banner');
+      if (banner) {
+        banner.style.display = 'flex';
+        $('fib-hint-msg').textContent = 'Paso 1: Haz clic en el 1º extremo del impulso (imán automático a mechas High/Low)';
+      }
+      const chartEl = $('tv-chart');
+      if (chartEl) chartEl.style.cursor = 'crosshair';
+      requestCanvasRedraw();
+    }
+
+    function cancelFibDrawing() {
+      state.manualFib.active = false;
+      state.manualFib.step = 0;
+      state.manualFib.hoverPrice = null;
+      state.manualFib.hoverIdx = null;
+      state.manualFib.snapPoint = null;
+      const btn = $('btn-draw-fib');
+      if (btn) {
+        btn.classList.remove('is-busy');
+        btn.textContent = (state.manualFib.p1 != null && state.manualFib.p2 != null) ? '📐 Redibujar Fib' : '📐 Fib Manual';
+      }
+      const banner = $('fib-hint-banner');
+      if (banner) banner.style.display = 'none';
+      const chartEl = $('tv-chart');
+      if (chartEl) chartEl.style.cursor = '';
+      requestCanvasRedraw();
+    }
+
+    function handleChartClick(param) {
+      if (!state.manualFib || !state.manualFib.active || !param || !param.point || !state.candleSeries) return;
+
+      const snap = resolveSnapPoint(param);
+      if (!snap || snap.price == null || isNaN(snap.price) || snap.price <= 0) return;
+
+      if (state.manualFib.step === 1) {
+        state.manualFib.p1 = snap.price;
+        state.manualFib.idx1 = snap.idx;
+        state.manualFib.hoverPrice = snap.price;
+        state.manualFib.hoverIdx = snap.idx;
+        state.manualFib.step = 2;
+        const banner = $('fib-hint-banner');
+        if (banner) {
+          const snapLabel = snap.snapped ? ` (${snap.kind})` : '';
+          $('fib-hint-msg').textContent = `Paso 2: Mueve el cursor y haz clic en el 2º extremo · Origen: ${formatPrice(snap.price)}${snapLabel}`;
+        }
+        requestCanvasRedraw();
+      } else if (state.manualFib.step === 2) {
+        if (Math.abs(snap.price - state.manualFib.p1) < 1e-9) return;
+        state.manualFib.p2 = snap.price;
+        state.manualFib.idx2 = snap.idx;
+        state.manualFib.active = false;
+        state.manualFib.step = 0;
+        state.manualFib.hoverPrice = null;
+        state.manualFib.hoverIdx = null;
+        state.manualFib.snapPoint = null;
+
+        const btn = $('btn-draw-fib');
+        if (btn) {
+          btn.classList.remove('is-busy');
+          btn.textContent = '📐 Redibujar Fib';
+        }
+        const banner = $('fib-hint-banner');
+        if (banner) banner.style.display = 'none';
+
+        const chartEl = $('tv-chart');
+        if (chartEl) chartEl.style.cursor = '';
+
+        updateFibActionButtons();
+        requestCanvasRedraw();
+      }
+    }
+
+    function updateFibActionButtons() {
+      const hasManual = state.manualFib && state.manualFib.p1 != null && state.manualFib.p2 != null;
+      const hasAuto = state.chartLayers && state.chartLayers.fib_ote;
+      const invBtn = $('btn-invert-fib');
+      if (invBtn) invBtn.style.display = (hasManual || hasAuto) ? 'inline-flex' : 'none';
+      const clrBtn = $('btn-clear-fib');
+      if (clrBtn) clrBtn.style.display = hasManual ? 'inline-flex' : 'none';
+      const lblBtn = $('btn-fib-labels');
+      if (lblBtn) lblBtn.style.display = (hasManual || hasAuto) ? 'inline-flex' : 'none';
+    }
+
+    function cycleFibLabelMode() {
+      const modes = ['right', 'left', 'none'];
+      const labels = {
+        right: '🏷️ Carteles: Fuera Der',
+        left: '🏷️ Carteles: Fuera Izq',
+        none: '🏷️ Carteles: Ocultos',
+      };
+      const curIdx = modes.indexOf(state.fibLabelMode || 'right');
+      const nextMode = modes[(curIdx + 1) % modes.length];
+      state.fibLabelMode = nextMode;
+      const btn = $('btn-fib-labels');
+      if (btn) btn.textContent = labels[nextMode];
+      requestCanvasRedraw();
+    }
+
+    function invertFibDrawing() {
+      if (state.manualFib && state.manualFib.p1 != null && state.manualFib.p2 != null) {
+        const tmpP = state.manualFib.p1;
+        state.manualFib.p1 = state.manualFib.p2;
+        state.manualFib.p2 = tmpP;
+        requestCanvasRedraw();
+      } else if (state.chartLayers && state.chartLayers.fib_ote) {
+        state.manualFib.autoInverted = !state.manualFib.autoInverted;
+        requestCanvasRedraw();
+      }
+    }
+
+    function clearFibDrawing() {
+      if (state.manualFib) {
+        state.manualFib.p1 = null;
+        state.manualFib.idx1 = null;
+        state.manualFib.p2 = null;
+        state.manualFib.idx2 = null;
+        state.manualFib.hoverPrice = null;
+        state.manualFib.hoverIdx = null;
+        state.manualFib.snapPoint = null;
+        state.manualFib.active = false;
+        state.manualFib.step = 0;
+      }
+      if (state.manualFibLines && state.manualFibLines.length) {
+        state.manualFibLines.forEach(l => {
+          try { state.candleSeries.removePriceLine(l); } catch(e) {}
+        });
+        state.manualFibLines = [];
+      }
+      updateFibActionButtons();
+      const btn = $('btn-draw-fib');
+      if (btn) {
+        btn.classList.remove('is-busy');
+        btn.textContent = '📐 Fib Manual';
+      }
+      const banner = $('fib-hint-banner');
+      if (banner) banner.style.display = 'none';
+      const fibTag = $('leg-fib-tag');
+      if (fibTag && (!state.chartLayers || !state.chartLayers.fib_ote)) {
+        fibTag.style.display = 'none';
+      }
+      const chartEl = $('tv-chart');
+      if (chartEl) chartEl.style.cursor = '';
+      requestCanvasRedraw();
+    }
+
+    // Detecta el impulso dominante (Major Dealing Range) en las últimas ~75 velas para Auto-Fib
+    function computeAutoFibDealingRange() {
+      const candles = state.cachedCandles || [];
+      if (candles.length < 10) return null;
+
+      const lookback = Math.min(candles.length, 75);
+      const startIdx = candles.length - lookback;
+
+      let maxH = -Infinity, idxMax = startIdx;
+      let minL = Infinity, idxMin = startIdx;
+
+      for (let i = startIdx; i < candles.length; i++) {
+        const h = Number(candles[i].high);
+        const l = Number(candles[i].low);
+        if (h >= maxH) { maxH = h; idxMax = i; }
+        if (l <= minL) { minL = l; idxMin = i; }
+      }
+
+      if (!isFinite(maxH) || !isFinite(minL) || maxH <= minL) return null;
+
+      // Verificar si después del último extremo hubo un impulso secundario significativo (>45% del rango)
+      let p1, idx1, p2, idx2, isBull;
+      const totalSpan = maxH - minL;
+
+      if (idxMax < idxMin) {
+        // Caída principal de maxH (idxMax) -> minL (idxMin)
+        // Ver si desde idxMin hasta el final ya rebotó con fuerza formando un nuevo swing alcista
+        let postHigh = -Infinity, idxPostHigh = idxMin;
+        for (let i = idxMin; i < candles.length; i++) {
+          const h = Number(candles[i].high);
+          if (h >= postHigh) { postHigh = h; idxPostHigh = i; }
+        }
+        const lastClose = Number(candles[candles.length - 1].close);
+        if ((candles.length - 1 - idxMin) >= 8 && (postHigh - minL) > totalSpan * 0.52 && lastClose < postHigh - (postHigh - minL) * 0.25) {
+          // Impulso alcista reciente en retroceso
+          isBull = true;
+          p1 = minL; idx1 = idxMin;
+          p2 = postHigh; idx2 = idxPostHigh;
+        } else {
+          // Impulso bajista dominante
+          isBull = false;
+          p1 = maxH; idx1 = idxMax;
+          p2 = minL; idx2 = idxMin;
+        }
+      } else {
+        // Subida principal de minL (idxMin) -> maxH (idxMax)
+        let postLow = Infinity, idxPostLow = idxMax;
+        for (let i = idxMax; i < candles.length; i++) {
+          const l = Number(candles[i].low);
+          if (l <= postLow) { postLow = l; idxPostLow = i; }
+        }
+        const lastClose = Number(candles[candles.length - 1].close);
+        if ((candles.length - 1 - idxMax) >= 8 && (maxH - postLow) > totalSpan * 0.52 && lastClose > postLow + (maxH - postLow) * 0.25) {
+          // Impulso bajista reciente en retroceso
+          isBull = false;
+          p1 = maxH; idx1 = idxMax;
+          p2 = postLow; idx2 = idxPostLow;
+        } else {
+          // Impulso alcista dominante
+          isBull = true;
+          p1 = minL; idx1 = idxMin;
+          p2 = maxH; idx2 = idxMax;
+        }
+      }
+
+      if (state.manualFib && state.manualFib.autoInverted) {
+        isBull = !isBull;
+        const tmp = p1; p1 = p2; p2 = tmp;
+      }
+
+      return { p1, idx1, p2, idx2, isBull };
+    }
+
+    // Dibuja el sombreado discreto de Zonas Horarias (Asia, Londres KZ, Nueva York KZ) en UTC
+    function drawSessionZonesOnCanvas(ctx, paneW, paneH) {
+      const layers = state.chartLayers || {};
+      if (layers.sessions === false) return;
+      const intradayTfs = ['M1', 'M5', 'M15', 'M30', 'H1'];
+      if (!intradayTfs.includes(state.timeframe)) return;
+
+      const candles = state.cachedCandles || [];
+      if (candles.length < 2) return;
+
+      const ts = state.chartInstance.timeScale();
+      const xA = ts.logicalToCoordinate(0);
+      const xB = ts.logicalToCoordinate(1);
+      const barStep = (xA != null && xB != null) ? Math.max(2, Math.abs(xB - xA)) : 8;
+      const halfBar = barStep * 0.5;
+
+      const SESSION_DEFS = {
+        ASIA: {
+          label: 'ASIA',
+          fill: 'rgba(56, 189, 248, 0.024)',
+          border: 'rgba(56, 189, 248, 0.13)',
+          hlLine: 'rgba(56, 189, 248, 0.24)',
+          text: 'rgba(56, 189, 248, 0.72)',
+          badgeBg: 'rgba(12, 19, 33, 0.72)',
+        },
+        LONDON: {
+          label: 'LONDRES KZ',
+          fill: 'rgba(0, 229, 153, 0.036)',
+          border: 'rgba(0, 229, 153, 0.18)',
+          hlLine: 'rgba(0, 229, 153, 0.30)',
+          text: 'rgba(0, 229, 153, 0.85)',
+          badgeBg: 'rgba(10, 24, 24, 0.76)',
+        },
+        NY: {
+          label: 'NY KZ',
+          fill: 'rgba(245, 158, 11, 0.038)',
+          border: 'rgba(245, 158, 11, 0.20)',
+          hlLine: 'rgba(245, 158, 11, 0.32)',
+          text: 'rgba(245, 158, 11, 0.88)',
+          badgeBg: 'rgba(26, 20, 12, 0.76)',
+        },
+      };
+
+      function classifySession(unixSec) {
+        const d = new Date(Number(unixSec) * 1000);
+        const dayKey = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+        if (mins >= 0 && mins < 420) return { key: 'ASIA', dayKey };
+        if (mins >= 420 && mins < 600) return { key: 'LONDON', dayKey };
+        if (mins >= 750 && mins < 930) return { key: 'NY', dayKey };
+        return null;
+      }
+
+      // Agrupar bloques continuos de la misma sesión y día
+      const blocks = [];
+      let cur = null;
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const info = classifySession(c.time);
+        if (!info) {
+          if (cur) { blocks.push(cur); cur = null; }
+          continue;
+        }
+        const h = Number(c.high);
+        const l = Number(c.low);
+        if (cur && cur.key === info.key && cur.dayKey === info.dayKey) {
+          cur.endIdx = i;
+          if (h > cur.high) cur.high = h;
+          if (l < cur.low) cur.low = l;
+        } else {
+          if (cur) blocks.push(cur);
+          cur = { key: info.key, dayKey: info.dayKey, startIdx: i, endIdx: i, high: h, low: l };
+        }
+      }
+      if (cur) blocks.push(cur);
+
+      ctx.save();
+      for (const b of blocks) {
+        const def = SESSION_DEFS[b.key];
+        if (!def) continue;
+
+        const cStart = ts.logicalToCoordinate(b.startIdx);
+        const cEnd = ts.logicalToCoordinate(b.endIdx);
+        if (cStart == null || cEnd == null) continue;
+
+        const rawX1 = cStart - halfBar;
+        const rawX2 = cEnd + halfBar;
+        if (rawX2 < 0 || rawX1 > paneW) continue;
+
+        const x1 = Math.max(0, rawX1);
+        const x2 = Math.min(paneW, rawX2);
+        const w = x2 - x1;
+        if (w < 2) continue;
+
+        // 1. Sombreado vertical discreto de fondo
+        ctx.fillStyle = def.fill;
+        ctx.fillRect(x1, 0, w, paneH);
+
+        // 2. Líneas verticales discontinuas sutiles en apertura/cierre de la ventana
+        ctx.strokeStyle = def.border;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 5]);
+        ctx.beginPath();
+        if (rawX1 >= 0 && rawX1 <= paneW) {
+          ctx.moveTo(Math.round(rawX1) + 0.5, 0);
+          ctx.lineTo(Math.round(rawX1) + 0.5, paneH);
+        }
+        if (rawX2 >= 0 && rawX2 <= paneW) {
+          ctx.moveTo(Math.round(rawX2) + 0.5, 0);
+          ctx.lineTo(Math.round(rawX2) + 0.5, paneH);
+        }
+        ctx.stroke();
+
+        // 3. Techo y piso de la sesión (High/Low de la Killzone o Rango Asiático)
+        const yHigh = state.candleSeries.priceToCoordinate(b.high);
+        const yLow = state.candleSeries.priceToCoordinate(b.low);
+        ctx.strokeStyle = def.hlLine;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        if (yHigh != null && yHigh >= 0 && yHigh <= paneH) {
+          ctx.moveTo(x1, Math.round(yHigh) + 0.5);
+          ctx.lineTo(x2, Math.round(yHigh) + 0.5);
+        }
+        if (yLow != null && yLow >= 0 && yLow <= paneH) {
+          ctx.moveTo(x1, Math.round(yLow) + 0.5);
+          ctx.lineTo(x2, Math.round(yLow) + 0.5);
+        }
+        ctx.stroke();
+
+        // 4. Etiqueta discreta en el margen inferior del gráfico (encima del eje de horas)
+        if (w >= 40) {
+          ctx.setLineDash([]);
+          ctx.font = "600 9px 'JetBrains Mono', monospace";
+          const txt = def.label;
+          const tw = ctx.measureText(txt).width;
+          if (w >= tw + 10) {
+            const cx = x1 + w * 0.5;
+            const pillW = tw + 10;
+            const pillH = 15;
+            const px = cx - pillW * 0.5;
+            const py = paneH - pillH - 6;
+
+            ctx.fillStyle = def.badgeBg;
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(px, py, pillW, pillH, 3);
+            } else {
+              ctx.rect(px, py, pillW, pillH);
+            }
+            ctx.fill();
+
+            ctx.strokeStyle = def.border;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+
+            ctx.fillStyle = def.text;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(txt, cx, py + pillH * 0.5 + 0.5);
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // Dibuja una caja de Fibonacci estilo TradingView en el Canvas (sin ensuciar el eje derecho)
+    function drawFibonacciBoxOnCanvas(ctx, paneW, paneH, fibCfg) {
+      const { p1, idx1, p2, idx2, titlePrefix } = fibCfg;
+      if (p1 == null || p2 == null || isNaN(p1) || isNaN(p2) || Math.abs(p2 - p1) < 1e-9) return;
+
+      const ts = state.chartInstance.timeScale();
+      const candles = state.cachedCandles || [];
+      const lastBarIdx = Math.max(0, candles.length - 1);
+
+      let x1 = idx1 != null ? ts.logicalToCoordinate(idx1) : null;
+      let x2 = idx2 != null ? ts.logicalToCoordinate(idx2) : null;
+      const xLast = ts.logicalToCoordinate(lastBarIdx);
+
+      if (x1 == null) x1 = 40;
+      if (x2 == null) x2 = xLast != null ? xLast : paneW - 80;
+
+      // El punto inicial del movimiento
+      const xStart = Math.min(x1, x2);
+      const labelMode = state.fibLabelMode || 'right';
+
+      // Las líneas se extienden limpiamente hasta el extremo derecho del gráfico (en el espacio vacío antes del eje)
+      const xLeft = (labelMode === 'left') ? Math.max(6, xStart - 120) : Math.max(6, xStart);
+      const xRight = Math.max(xLeft + 50, paneW - 4);
+
+      const diff = p2 - p1;
+      const sym = state.symbol;
+
+      const priceForRatio = r => p2 - diff * r;
+      const yForRatio = r => state.candleSeries.priceToCoordinate(priceForRatio(r));
+
+      ctx.save();
+
+      // 1. Sombreado del Bolsillo OTE / Golden Pocket (0.618 a 0.786)
+      const y618 = yForRatio(0.618);
+      const y786 = yForRatio(0.786);
+      if (y618 != null && y786 != null) {
+        const topOte = Math.min(y618, y786);
+        const hOte = Math.abs(y786 - y618);
+        const grad = ctx.createLinearGradient(xLeft, topOte, xRight, topOte + hOte);
+        grad.addColorStop(0, 'rgba(245, 158, 11, 0.11)');
+        grad.addColorStop(0.5, 'rgba(168, 85, 247, 0.13)');
+        grad.addColorStop(1, 'rgba(244, 63, 94, 0.09)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(xLeft, topOte, xRight - xLeft, hOte);
+      }
+
+      // 2. Sombreado sutil entre Equilibrium (0.50) y 0.618
+      const y50 = yForRatio(0.500);
+      if (y50 != null && y618 != null) {
+        const topEq = Math.min(y50, y618);
+        const hEq = Math.abs(y618 - y50);
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.04)';
+        ctx.fillRect(xLeft, topEq, xRight - xLeft, hEq);
+      }
+
+      // 3. Sombreado sutil de zona de Expansión / Take Profit (0.0 a -0.272)
+      const y0 = yForRatio(0.0);
+      const yTp1 = yForRatio(-0.272);
+      if (y0 != null && yTp1 != null) {
+        const topTp = Math.min(y0, yTp1);
+        const hTp = Math.abs(yTp1 - y0);
+        ctx.fillStyle = 'rgba(0, 229, 153, 0.045)';
+        ctx.fillRect(xLeft, topTp, xRight - xLeft, hTp);
+      }
+
+      // 4. Línea de tendencia diagonal punteada (Origen 100% -> Extremo 0%) y nodos de anclaje interactivos
+      const y1 = state.candleSeries.priceToCoordinate(p1);
+      const y2 = state.candleSeries.priceToCoordinate(p2);
+
+      // Guardar coordenadas de los puntos para detección de colisión y arrastre interactivo
+      state.currentFibPoints = {
+        source: fibCfg.source || (fibCfg.titlePrefix === 'Auto' ? 'auto' : 'manual'),
+        p1,
+        idx1,
+        x1,
+        y1,
+        p2,
+        idx2,
+        x2,
+        y2,
+      };
+
+      if (y1 != null && y2 != null) {
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
+        ctx.lineWidth = 1.1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // Nodos circulares interactivos en los puntos de anclaje P1 y P2
+        ctx.setLineDash([]);
+        const nodes = [
+          { key: 'p1', x: x1, y: y1, col: '#38bdf8', label: 'P1 (100%)' },
+          { key: 'p2', x: x2, y: y2, col: '#a855f7', label: 'P2 (0%)' },
+        ];
+
+        nodes.forEach(n => {
+          if (n.x >= 0 && n.x <= paneW && n.y >= 0 && n.y <= paneH) {
+            const isHovered = (state.fibHoveredNode === n.key);
+            const isDragged = (state.fibDragging && state.fibDragging.active && state.fibDragging.node === n.key);
+
+            // Halo animado o resaltado en hover / drag
+            if (isHovered || isDragged) {
+              ctx.beginPath();
+              ctx.arc(n.x, n.y, isDragged ? 14 : 11, 0, Math.PI * 2);
+              ctx.fillStyle = isDragged ? 'rgba(0, 229, 153, 0.35)' : 'rgba(56, 189, 248, 0.25)';
+              ctx.fill();
+            }
+
+            // Nodo circular central
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, isHovered ? 6 : 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#070a10';
+            ctx.fill();
+            ctx.lineWidth = isHovered ? 2.5 : 1.8;
+            ctx.strokeStyle = isDragged ? '#00e599' : n.col;
+            ctx.stroke();
+
+            // Etiqueta flotante con estilo pill
+            ctx.font = "bold 9px 'JetBrains Mono', monospace";
+            const tooltipText = isDragged ? 'Soltá para fijar' : (isHovered ? '↔ Arrastrá' : n.label);
+            const tw = ctx.measureText(tooltipText).width;
+            const padX = 4;
+            const pw = tw + padX * 2;
+            const ph = 13;
+            const px = n.x - pw * 0.5;
+            const py = n.y - ph - (isHovered ? 8 : 6);
+
+            ctx.fillStyle = 'rgba(7, 10, 16, 0.90)';
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(px, py, pw, ph, 3);
+            } else {
+              ctx.rect(px, py, pw, ph);
+            }
+            ctx.fill();
+
+            ctx.strokeStyle = isDragged ? '#00e599' : n.col;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+
+            ctx.fillStyle = isDragged ? '#00e599' : (isHovered ? '#ffffff' : n.col);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(tooltipText, n.x, py + ph * 0.5 + 0.5);
+          }
+        });
+      }
+
+      // 5. Líneas horizontales de nivel + Etiquetas compactas FUERA de las velas
+      const candidates = [];
+      for (const lvl of FIBO_LEVELS_DEF) {
+        const price = priceForRatio(lvl.ratio);
+        if (price <= 0) continue;
+        const y = state.candleSeries.priceToCoordinate(price);
+        if (y == null || y < -20 || y > paneH + 20) continue;
+
+        // Dibujar la línea horizontal acotada a [xLeft, xRight]
+        ctx.strokeStyle = lvl.color;
+        ctx.lineWidth = lvl.lineWidth;
+        ctx.setLineDash(lvl.dash || []);
+        ctx.beginPath();
+        ctx.moveTo(xLeft, Math.round(y) + 0.5);
+        ctx.lineTo(xRight, Math.round(y) + 0.5);
+        ctx.stroke();
+
+        candidates.push({ lvl, price, y });
+      }
+
+      if (labelMode !== 'none') {
+        // Ordenar por prioridad para decidir qué etiquetas mostrar sin solaparse
+        const acceptedY = [];
+        const sortedByPriority = candidates.slice().sort((a, b) => a.lvl.priority - b.lvl.priority);
+        const visibleLabels = new Set();
+
+        for (const item of sortedByPriority) {
+          if (item.y < 10 || item.y > paneH - 10) continue;
+          const collides = acceptedY.some(ay => Math.abs(ay - item.y) < 13.5);
+          if (!collides) {
+            acceptedY.push(item.y);
+            visibleLabels.add(item.lvl.ratio);
+          }
+        }
+
+        ctx.setLineDash([]);
+        ctx.font = "600 9.5px 'JetBrains Mono', monospace";
+        for (const item of candidates) {
+          if (!visibleLabels.has(item.lvl.ratio)) continue;
+          const txt = `${item.lvl.short} · ${formatPrice(item.price, sym)}`;
+          const tw = ctx.measureText(txt).width;
+          const padX = 5;
+          const boxW = tw + padX * 2;
+          const boxH = 14;
+
+          // UBICACIÓN DE LOS CARTELITOS: Completamente fuera de las velas
+          let bx;
+          if (labelMode === 'left') {
+            // A la izquierda del inicio del movimiento, fuera de las velas
+            bx = Math.max(6, xStart - boxW - 8);
+          } else {
+            // A la derecha, en el espacio vacío del gráfico (más allá de las velas más recientes)
+            bx = (paneW - 6) - boxW;
+          }
+          const by = item.y - boxH * 0.5;
+
+          // Pastilla oscura translúcida detrás del texto para lectura cristalina
+          ctx.fillStyle = 'rgba(7, 10, 16, 0.90)';
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(bx, by, boxW, boxH, 3);
+          } else {
+            ctx.rect(bx, by, boxW, boxH);
+          }
+          ctx.fill();
+
+          ctx.strokeStyle = item.lvl.color;
+          ctx.lineWidth = 0.85;
+          ctx.stroke();
+
+          ctx.fillStyle = item.lvl.color;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(txt, bx + boxW * 0.5, item.y + 0.5);
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // --- Detector Local de Respaldo de Zonas SMC (FVG y OB) ---
+    // Garantiza que cualquier activo o moneda (EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD, etc.) tenga cajas visibles
+    function detectLocalSmcZones(candles) {
+      if (!candles || candles.length < 5) return { fvgs: [], order_blocks: [] };
+      const fvgs = [];
+      const obs = [];
+      const n = candles.length;
+      const startI = Math.max(2, n - 80);
+
+      // 1. Fair Value Gaps (3 velas, solo vivos / no mitigados)
+      for (let i = startI; i < n; i++) {
+        const prev = candles[i - 2];
+        const cur = candles[i];
+        if (!prev || !cur) continue;
+
+        const pHigh = Number(prev.high);
+        const cLow = Number(cur.low);
+        const pLow = Number(prev.low);
+        const cHigh = Number(cur.high);
+
+        if (cLow > pHigh) {
+          // Bullish FVG
+          const top = cLow;
+          const bottom = pHigh;
+          let mitigated = false;
+          for (let k = i + 1; k < n; k++) {
+            if (Number(candles[k].low) <= bottom) { mitigated = true; break; }
+          }
+          if (!mitigated) {
+            fvgs.push({
+              type: 'BULLISH_FVG',
+              top,
+              bottom,
+              start_time: cur.time,
+              start_idx: i,
+            });
+          }
+        } else if (cHigh < pLow) {
+          // Bearish FVG
+          const top = pLow;
+          const bottom = cHigh;
+          let mitigated = false;
+          for (let k = i + 1; k < n; k++) {
+            if (Number(candles[k].high) >= top) { mitigated = true; break; }
+          }
+          if (!mitigated) {
+            fvgs.push({
+              type: 'BEARISH_FVG',
+              top,
+              bottom,
+              start_time: cur.time,
+              start_idx: i,
+            });
+          }
+        }
+      }
+
+      // 2. Order Blocks (última vela contraria previa a un impulso fuerte que quiebra la vela previa)
+      for (let i = startI; i < n - 1; i++) {
+        const c0 = candles[i];
+        const c1 = candles[i + 1];
+        if (!c0 || !c1) continue;
+
+        const c0Open = Number(c0.open), c0Close = Number(c0.close), c0High = Number(c0.high), c0Low = Number(c0.low);
+        const c1Open = Number(c1.open), c1Close = Number(c1.close), c1High = Number(c1.high), c1Low = Number(c1.low);
+        const body0 = Math.abs(c0Close - c0Open);
+        const body1 = Math.abs(c1Close - c1Open);
+
+        // Bullish OB: vela bajista previa a impulso alcista fuerte
+        if (c0Close < c0Open && c1Close > c1Open && c1Close > c0High && body1 > body0 * 1.1) {
+          const top = Math.max(c0Open, c0High);
+          const bottom = c0Low;
+          let mitigated = false;
+          for (let k = i + 2; k < n; k++) {
+            if (Number(candles[k].low) < bottom) { mitigated = true; break; }
+          }
+          if (!mitigated) {
+            obs.push({
+              type: 'BULLISH_OB',
+              top,
+              bottom,
+              start_time: c0.time,
+              start_idx: i,
+            });
+          }
+        }
+        // Bearish OB: vela alcista previa a impulso bajista fuerte
+        else if (c0Close > c0Open && c1Close < c1Open && c1Close < c0Low && body1 > body0 * 1.1) {
+          const top = c0High;
+          const bottom = Math.min(c0Open, c0Low);
+          let mitigated = false;
+          for (let k = i + 2; k < n; k++) {
+            if (Number(candles[k].high) > top) { mitigated = true; break; }
+          }
+          if (!mitigated) {
+            obs.push({
+              type: 'BEARISH_OB',
+              top,
+              bottom,
+              start_time: c0.time,
+              start_idx: i,
+            });
+          }
+        }
+      }
+
+      return { fvgs, order_blocks: obs };
+    }
+
+    // Dibuja las Cajas Sombreadas de Order Blocks (OB) y Fair Value Gaps (FVG) en el Canvas
+    // Detecta y resalta automáticamente la confluencia con el OTE de Fibonacci (0.618 a 0.786)
+    function drawSmcBoxesOnCanvas(ctx, paneW, paneH) {
+      const layers = state.chartLayers || {};
+      if (layers.smc_boxes === false) return null;
+
+      const candles = state.cachedCandles || [];
+      if (candles.length < 5) return null;
+
+      const ts = state.chartInstance.timeScale();
+      const sym = state.symbol;
+
+      const analysisPatterns = (state.lastAnalysis && state.lastAnalysis.patterns) || {};
+      const backendFvgs = analysisPatterns.fvgs || [];
+      const backendObs = analysisPatterns.order_blocks || [];
+      const localZones = detectLocalSmcZones(candles);
+
+      const allZones = [];
+      const seenKeys = new Set();
+
+      function addZone(z) {
+        if (!z || z.top == null || z.bottom == null || Number(z.top) <= Number(z.bottom)) return;
+        const key = `${z.type}_${Math.round(Number(z.top) * 100000)}_${Math.round(Number(z.bottom) * 100000)}`;
+        if (seenKeys.has(key)) return;
+        seenKeys.add(key);
+        allZones.push(z);
+      }
+
+      backendObs.forEach(ob => addZone(ob));
+      backendFvgs.forEach(fg => addZone(fg));
+      localZones.order_blocks.forEach(ob => addZone(ob));
+      localZones.fvgs.forEach(fg => addZone(fg));
+
+      if (!allZones.length) return null;
+
+      // Calcular OTE del Fibonacci activo (Auto o Manual) si está presente
+      let oteMin = null, oteMax = null;
+      if (state.currentFibPoints && state.currentFibPoints.p1 != null && state.currentFibPoints.p2 != null) {
+        const p1 = Number(state.currentFibPoints.p1);
+        const p2 = Number(state.currentFibPoints.p2);
+        const diff = p2 - p1;
+        const r618 = p2 - diff * 0.618;
+        const r786 = p2 - diff * 0.786;
+        oteMin = Math.min(r618, r786);
+        oteMax = Math.max(r618, r786);
+      }
+
+      let detectedConfluence = null;
+      const recentZones = allZones.slice(-8);
+
+      ctx.save();
+
+      for (const z of recentZones) {
+        const isBull = (z.type || '').includes('BULLISH');
+        const isOB = (z.type || '').includes('OB');
+
+        const yTop = state.candleSeries.priceToCoordinate(Number(z.top));
+        const yBottom = state.candleSeries.priceToCoordinate(Number(z.bottom));
+        if (yTop == null || yBottom == null) continue;
+
+        const yBoxTop = Math.min(yTop, yBottom);
+        const yBoxH = Math.max(4, Math.abs(yBottom - yTop));
+        if (yBoxTop + yBoxH < 0 || yBoxTop > paneH) continue;
+
+        let xStart = null;
+        if (z.start_time != null && ts.timeToCoordinate) {
+          xStart = ts.timeToCoordinate(z.start_time);
+        }
+        if (xStart == null && z.start_idx != null) {
+          xStart = ts.logicalToCoordinate(z.start_idx);
+        }
+        if (xStart == null) {
+          const cIdx = candles.findIndex(c => c.time === z.start_time);
+          if (cIdx >= 0) xStart = ts.logicalToCoordinate(cIdx);
+        }
+        if (xStart == null) xStart = 40;
+
+        const clampedX = Math.max(6, Math.min(paneW - 40, xStart));
+        const boxW = Math.max(30, (paneW - 4) - clampedX);
+
+        // Regla Pro: Confluencia exacta cuando OTE (0.618 - 0.705 - 0.786) coincide con OB o FVG
+        const hasConfluence = (oteMin != null && oteMax != null &&
+          Math.max(Number(z.bottom), oteMin) <= Math.min(Number(z.top), oteMax));
+
+        if (hasConfluence && !detectedConfluence) {
+          detectedConfluence = {
+            desc: `${isOB ? 'OB' : 'FVG'} ${isBull ? 'Alcista' : 'Bajista'} en OTE [${formatPrice(z.bottom, sym)} – ${formatPrice(z.top, sym)}]`,
+          };
+        }
+
+        let fillGrad = ctx.createLinearGradient(clampedX, yBoxTop, clampedX + boxW, yBoxTop);
+        let borderCol, labelCol, tagTxt;
+
+        if (hasConfluence) {
+          fillGrad.addColorStop(0, isBull ? 'rgba(0, 229, 153, 0.28)' : 'rgba(255, 59, 105, 0.28)');
+          fillGrad.addColorStop(0.4, 'rgba(245, 158, 11, 0.22)');
+          fillGrad.addColorStop(1, 'rgba(168, 85, 247, 0.12)');
+          borderCol = '#f59e0b';
+          labelCol = '#f59e0b';
+          tagTxt = `🎯 ${isOB ? 'OB' : 'FVG'} + OTE`;
+        } else if (isOB) {
+          if (isBull) {
+            fillGrad.addColorStop(0, 'rgba(0, 229, 153, 0.16)');
+            fillGrad.addColorStop(1, 'rgba(0, 229, 153, 0.03)');
+            borderCol = 'rgba(0, 229, 153, 0.55)';
+            labelCol = '#00e599';
+            tagTxt = '📦 OB+';
+          } else {
+            fillGrad.addColorStop(0, 'rgba(255, 59, 105, 0.16)');
+            fillGrad.addColorStop(1, 'rgba(255, 59, 105, 0.03)');
+            borderCol = 'rgba(255, 59, 105, 0.55)';
+            labelCol = '#ff3b69';
+            tagTxt = '📦 OB-';
+          }
+        } else {
+          if (isBull) {
+            fillGrad.addColorStop(0, 'rgba(16, 185, 129, 0.14)');
+            fillGrad.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
+            borderCol = 'rgba(16, 185, 129, 0.45)';
+            labelCol = '#10b981';
+            tagTxt = '⚡ FVG+';
+          } else {
+            fillGrad.addColorStop(0, 'rgba(244, 63, 94, 0.14)');
+            fillGrad.addColorStop(1, 'rgba(244, 63, 94, 0.02)');
+            borderCol = 'rgba(244, 63, 94, 0.45)';
+            labelCol = '#f43f5e';
+            tagTxt = '⚡ FVG-';
+          }
+        }
+
+        // 1. Fondo de la caja
+        ctx.fillStyle = fillGrad;
+        ctx.fillRect(clampedX, yBoxTop, boxW, yBoxH);
+
+        // 2. Borde de la caja
+        ctx.strokeStyle = borderCol;
+        ctx.lineWidth = hasConfluence ? 1.5 : (isOB ? 1.1 : 0.9);
+        ctx.setLineDash(isOB ? [] : [4, 3]);
+        ctx.strokeRect(clampedX, yBoxTop, boxW, yBoxH);
+
+        // 3. Etiqueta identificadora en el extremo derecho (margen libre)
+        ctx.setLineDash([]);
+        ctx.font = hasConfluence ? "bold 9.5px 'JetBrains Mono', monospace" : "600 9px 'JetBrains Mono', monospace";
+        const tw = ctx.measureText(tagTxt).width;
+        const pillW = tw + 10;
+        const pillH = 14;
+        const pillX = Math.max(clampedX + 6, (paneW - 6) - pillW);
+        const pillY = Math.max(2, Math.min(paneH - pillH - 2, yBoxTop + yBoxH * 0.5 - pillH * 0.5));
+
+        ctx.fillStyle = hasConfluence ? 'rgba(26, 20, 12, 0.92)' : 'rgba(7, 10, 16, 0.88)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(pillX, pillY, pillW, pillH, 3);
+        } else {
+          ctx.rect(pillX, pillY, pillW, pillH);
+        }
+        ctx.fill();
+
+        ctx.strokeStyle = borderCol;
+        ctx.lineWidth = 0.85;
+        ctx.stroke();
+
+        ctx.fillStyle = labelCol;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(tagTxt, pillX + pillW * 0.5, pillY + pillH * 0.5 + 0.5);
+      }
+
+      ctx.restore();
+      return detectedConfluence;
+    }
+
+    // Renderizador maestro del Canvas superpuesto (HiDPI / Retina)
+    function renderCustomChartCanvas() {
+      const canvas = $('chart-custom-canvas');
+      if (!canvas || !state.chartInstance || !state.candleSeries) return;
+
+      const pane = state.chartInstance.paneSize ? state.chartInstance.paneSize() : null;
+      const container = $('tv-chart');
+      const paneW = (pane && pane.width > 0) ? pane.width : (container ? container.clientWidth - 70 : 0);
+      const paneH = (pane && pane.height > 0) ? pane.height : (container ? container.clientHeight - 28 : 0);
+      if (paneW <= 0 || paneH <= 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const targetW = Math.round(paneW * dpr);
+      const targetH = Math.round(paneH * dpr);
+
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        canvas.style.width = paneW + 'px';
+        canvas.style.height = paneH + 'px';
+      }
+
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, paneW, paneH);
+
+      // Recortar estrictamente al área de velas (nunca invadir el eje de precios ni el eje de tiempo)
+      ctx.beginPath();
+      ctx.rect(0, 0, paneW, paneH);
+      ctx.clip();
+
+      // 1. Dibujar Zonas Horarias (Asia, Londres KZ, NY KZ)
+      drawSessionZonesOnCanvas(ctx, paneW, paneH);
+
+      // 2. Dibujar Fibonacci Automático (si la capa Fib OTE Auto está activa)
+      const layers = state.chartLayers || {};
+      const fibTagEl = $('leg-fib-tag');
+      let fibLegendHtml = '';
+
+      // Resetear puntos de colisión al inicio de cada renderizado
+      state.currentFibPoints = null;
+
+      if (layers.fib_ote) {
+        const autoRange = computeAutoFibDealingRange();
+        if (autoRange) {
+          drawFibonacciBoxOnCanvas(ctx, paneW, paneH, {
+            p1: autoRange.p1,
+            idx1: autoRange.idx1,
+            p2: autoRange.p2,
+            idx2: autoRange.idx2,
+            source: 'auto',
+            titlePrefix: 'Auto',
+          });
+          fibLegendHtml = `Fib OTE <b>${autoRange.isBull ? '▲ Bullish' : '▼ Bearish'}</b> [${formatPrice(Math.min(autoRange.p1, autoRange.p2))} – ${formatPrice(Math.max(autoRange.p1, autoRange.p2))}]`;
+        }
+      }
+
+      // 3. Dibujar Fibonacci Manual (fijado o en vista previa interactiva mientras se mueve el mouse)
+      const mf = state.manualFib;
+      if (mf) {
+        if (mf.active && mf.step === 2 && mf.p1 != null && mf.hoverPrice != null) {
+          drawFibonacciBoxOnCanvas(ctx, paneW, paneH, {
+            p1: mf.p1,
+            idx1: mf.idx1,
+            p2: mf.hoverPrice,
+            idx2: mf.hoverIdx,
+            source: 'manual',
+            titlePrefix: 'Preview',
+          });
+        } else if (mf.p1 != null && mf.p2 != null) {
+          drawFibonacciBoxOnCanvas(ctx, paneW, paneH, {
+            p1: mf.p1,
+            idx1: mf.idx1,
+            p2: mf.p2,
+            idx2: mf.idx2,
+            source: 'manual',
+            titlePrefix: 'Manual',
+          });
+          fibLegendHtml = `Fib Manual [${formatPrice(Math.min(mf.p1, mf.p2))} – ${formatPrice(Math.max(mf.p1, mf.p2))}]`;
+        }
+
+        // Indicador magnético sobre la mecha cuando la herramienta manual está activa o en arrastre
+        const activeSnap = (mf.active && mf.snapPoint) || (state.fibDragging && state.fibDragging.active && mf.snapPoint);
+        if (activeSnap) {
+          const sp = activeSnap;
+          const sx = state.chartInstance.timeScale().logicalToCoordinate(sp.idx);
+          const sy = state.candleSeries.priceToCoordinate(sp.price);
+          if (sx != null && sy != null) {
+            ctx.beginPath();
+            ctx.arc(sx, sy, sp.snapped ? 6 : 4, 0, Math.PI * 2);
+            ctx.strokeStyle = sp.snapped ? '#00e599' : '#38bdf8';
+            ctx.lineWidth = 2.2;
+            ctx.stroke();
+            if (sp.snapped) {
+              ctx.fillStyle = 'rgba(0, 229, 153, 0.28)';
+              ctx.fill();
+            }
+          }
+        }
+      }
+
+      if (fibTagEl) {
+        if (fibLegendHtml) {
+          fibTagEl.style.display = 'inline';
+          fibTagEl.innerHTML = fibLegendHtml;
+        } else {
+          fibTagEl.style.display = 'none';
+        }
+      }
+
+      // 4. Dibujar Cajas SMC (Order Blocks y Fair Value Gaps) para todos los activos/monedas
+      const confTagEl = $('leg-confluence-tag');
+      const confluenceInfo = drawSmcBoxesOnCanvas(ctx, paneW, paneH);
+      if (confTagEl) {
+        if (confluenceInfo && confluenceInfo.desc) {
+          confTagEl.style.display = 'inline';
+          confTagEl.innerHTML = `🎯 <b>Confluencia:</b> ${confluenceInfo.desc}`;
+        } else {
+          confTagEl.style.display = 'none';
+        }
+      }
+
+      ctx.restore();
+    }
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && state.manualFib && state.manualFib.active) {
+        cancelFibDrawing();
+      }
+    });
 
     // Formatea la distancia en pips (Forex) o dólares (Oro/Crypto) para las etiquetas del gráfico
     function formatDistanceLabel(dist, sym = state.symbol) {
@@ -2772,7 +4234,7 @@
       return (d / 0.0001).toFixed(1) + 'p';
     }
 
-    // Alternar visibilidad de una capa del gráfico (Plan, FVG/OB, PDH/PDL, Swings, Posiciones)
+    // Alternar visibilidad de una capa del gráfico (Plan, Cajas OB/FVG, PDH/PDL, Swings, Posiciones)
     function toggleChartLayer(layerKey) {
       if (!state.chartLayers || !(layerKey in state.chartLayers)) return;
       state.chartLayers[layerKey] = !state.chartLayers[layerKey];
@@ -2781,6 +4243,7 @@
         btn.classList.toggle('off', !state.chartLayers[layerKey]);
       }
       renderChartOverlays();
+      requestCanvasRedraw();
     }
 
     // Dibuja todas las capas activas sobre el gráfico:
@@ -3094,6 +4557,10 @@
             }
           });
       }
+
+      // 5. Actualizar estado de botones y redibujar el lienzo vectorial (Zonas Horarias + Fibonacci Pro)
+      updateFibActionButtons();
+      requestCanvasRedraw();
     }
 
     // Cargar y actualizar datos del gráfico
@@ -3692,6 +5159,7 @@
       if (!sym) return;
       const cleanSym = String(sym).toUpperCase().replace('/', '').trim();
       state.symbol = cleanSym;
+      clearFibDrawing();
       resetTradeInputs(true);
       renderSymbolsList();
       loadChartData();
@@ -4386,6 +5854,13 @@
       const modal = document.getElementById('eurusd-modal');
       if (modal) {
         modal.classList.add('open');
+        document.querySelectorAll('.eurusd-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'daily-guide'));
+        const tabGuide = document.getElementById('eurusd-tab-daily-guide');
+        const tabLatest = document.getElementById('eurusd-tab-latest');
+        const tabHistory = document.getElementById('eurusd-tab-history');
+        if (tabGuide) tabGuide.style.display = 'flex';
+        if (tabLatest) tabLatest.style.display = 'none';
+        if (tabHistory) tabHistory.style.display = 'none';
         loadEurusdLatest();
         loadEurusdHistory();
       }
@@ -4404,14 +5879,77 @@
         document.querySelectorAll('.eurusd-tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const tab = btn.dataset.tab;
-        document.getElementById('eurusd-tab-latest').style.display = tab === 'latest' ? 'flex' : 'none';
-        document.getElementById('eurusd-tab-history').style.display = tab === 'history' ? 'flex' : 'none';
+        const tabGuide = document.getElementById('eurusd-tab-daily-guide');
+        const tabLatest = document.getElementById('eurusd-tab-latest');
+        const tabHistory = document.getElementById('eurusd-tab-history');
+        if (tabGuide) tabGuide.style.display = tab === 'daily-guide' ? 'flex' : 'none';
+        if (tabLatest) tabLatest.style.display = tab === 'latest' ? 'flex' : 'none';
+        if (tabHistory) tabHistory.style.display = tab === 'history' ? 'flex' : 'none';
         if (tab === 'history') loadEurusdHistory();
       });
     });
 
     function renderEurusdReport(data) {
       if (!data) return;
+
+      // Render 🎯 Guía Operativa del Día
+      const guide = data.daily_guide || {};
+      const diag = guide.diagnosis || {};
+      const lvls = guide.levels || {};
+      const risk = guide.risk_management || {};
+
+      const gTrafficTitle = document.getElementById('guide-traffic-title');
+      const gTrafficBadge = document.getElementById('guide-traffic-badge');
+      const gTrafficMsg = document.getElementById('guide-traffic-msg');
+      const gTrafficBanner = document.getElementById('guide-traffic-banner');
+
+      if (gTrafficBadge) {
+        const isGreen = guide.traffic_light === 'LUZ_VERDE';
+        gTrafficBadge.className = `eurusd-badge ${isGreen ? 'bull' : 'warn'}`;
+        gTrafficBadge.textContent = isGreen ? '🟢 LUZ VERDE' : '🟡 PRECAUCIÓN';
+        if (gTrafficTitle) gTrafficTitle.textContent = isGreen ? '🟢 Semáforo: Condiciones Normales de Rango' : '⚠️ Semáforo: Noticias de Alto Impacto Hoy';
+        if (gTrafficMsg) gTrafficMsg.textContent = guide.traffic_message || 'Condiciones normales de mercado.';
+        if (gTrafficBanner) {
+          gTrafficBanner.style.borderLeftColor = isGreen ? 'var(--bull)' : 'var(--warn)';
+        }
+      }
+
+      const gRangeBadge = document.getElementById('guide-range-badge');
+      if (gRangeBadge) gRangeBadge.textContent = `Rango Diario: ${lvls.range_total_pips ?? '—'} pips`;
+
+      const gPdh = document.getElementById('guide-pdh-val');
+      if (gPdh) gPdh.textContent = lvls.pdh_ceiling != null ? Number(lvls.pdh_ceiling).toFixed(5) : '—';
+      const gDistPdh = document.getElementById('guide-dist-pdh');
+      if (gDistPdh) gDistPdh.textContent = lvls.dist_pdh_pips != null ? `${lvls.dist_pdh_pips > 0 ? 'A ' + lvls.dist_pdh_pips : '+' + Math.abs(lvls.dist_pdh_pips)} pips` : '—';
+
+      const gEq = document.getElementById('guide-eq-val');
+      if (gEq) gEq.textContent = lvls.equilibrium_50 != null ? Number(lvls.equilibrium_50).toFixed(5) : '—';
+      const gDistEq = document.getElementById('guide-dist-eq');
+      if (gDistEq) gDistEq.textContent = lvls.dist_eq_pips != null ? `A ${lvls.dist_eq_pips} pips` : '—';
+
+      const gPdl = document.getElementById('guide-pdl-val');
+      if (gPdl) gPdl.textContent = lvls.pdl_floor != null ? Number(lvls.pdl_floor).toFixed(5) : '—';
+      const gDistPdl = document.getElementById('guide-dist-pdl');
+      if (gDistPdl) gDistPdl.textContent = lvls.dist_pdl_pips != null ? `${lvls.dist_pdl_pips > 0 ? 'A ' + lvls.dist_pdl_pips : '-' + Math.abs(lvls.dist_pdl_pips)} pips` : '—';
+
+      const gLocBadge = document.getElementById('guide-location-badge');
+      if (gLocBadge) {
+        gLocBadge.textContent = diag.zone_label || 'Calculando...';
+        gLocBadge.className = `eurusd-badge ${diag.zone === 'TECHO_VENTA' ? 'bear' : (diag.zone === 'PISO_COMPRA' ? 'bull' : 'neutral')}`;
+      }
+
+      const gActionHeadline = document.getElementById('guide-action-headline');
+      if (gActionHeadline) gActionHeadline.textContent = diag.headline || '—';
+      const gActionPlan = document.getElementById('guide-action-plan');
+      if (gActionPlan) gActionPlan.textContent = diag.action_plan || '—';
+
+      const gCalcSl = document.getElementById('guide-calc-sl');
+      if (gCalcSl) gCalcSl.textContent = `${risk.suggested_sl_pips ?? 18} pips`;
+      const gCalcLot = document.getElementById('guide-calc-lot');
+      if (gCalcLot) gCalcLot.textContent = `${risk.suggested_lot ?? 0.25} lotes`;
+      const gCalcWin = document.getElementById('guide-calc-win');
+      if (gCalcWin) gCalcWin.textContent = `+$${risk.expected_win_usd ?? 85} USD`;
+
       const metaDb = data._meta_db || data.meta || {};
       const metaEl = document.getElementById('eurusd-modal-meta');
       if (metaEl) metaEl.textContent = `${metaDb.run_key || data.meta?.run_key || '-'} | ${metaDb.run_time || data.meta?.run_time || '-'} UTC`;
@@ -4520,6 +6058,76 @@
           <ul class="tribunal-points">${pts}</ul>
           ${an.macro_threats ? `<div style="font-size:0.72rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:0.4rem;">🌐 ${escEurusdHtml(an.macro_threats)}</div>` : ''}
         `;
+      }
+
+      // Bank Consensus Section
+      const bankSec = document.getElementById('eurusd-bank-consensus-section');
+      const bankBody = document.getElementById('eurusd-bank-consensus-body');
+      const bankBadge = document.getElementById('eurusd-bank-consensus-badge');
+      const bankCons = data.bank_consensus || {};
+      const bankMeta = bankCons.metadata || {};
+      const bankMetrics = bankMeta.consensus || {};
+      const bankList = Array.isArray(bankCons.analyses) ? bankCons.analyses : [];
+
+      if (bankSec && bankBody && bankList.length) {
+        bankSec.style.display = 'block';
+        if (bankBadge) {
+          const domBias = (bankMetrics.dominant_bias || 'bearish').toLowerCase();
+          const badgeCls = domBias === 'bearish' ? 'bear' : (domBias === 'bullish' ? 'bull' : 'warn');
+          bankBadge.className = `eurusd-badge ${badgeCls}`;
+          bankBadge.textContent = `${bankMetrics.bearish_pct ?? 60}% Bajista · ${bankMetrics.neutral_pct ?? 30}% Rango · ${bankMetrics.bullish_pct ?? 10}% Alcista`;
+        }
+
+        const cardsHtml = bankList.map(a => {
+          const b = String(a.bias || 'neutral').toLowerCase();
+          const bCls = b === 'bearish' ? 'bear' : (b === 'bullish' ? 'bull' : 'neutral');
+          const bLabel = b === 'bearish' ? '🔻 Venta/Bearish' : (b === 'bullish' ? '🔺 Compra/Bullish' : '⏸️ Rango/Neutral');
+          const kl = a.key_levels || {};
+          return `
+            <div class="bank-card">
+              <div class="bank-card-header">
+                <div>
+                  <strong style="color:var(--text-main); font-size:0.83rem;">${escEurusdHtml(a.institution || 'Banco')}</strong>
+                  <span style="color:var(--text-muted); font-size:0.73rem; margin-left:0.35rem;">(${escEurusdHtml(a.author || 'Estratega')})</span>
+                </div>
+                <span class="eurusd-badge ${bCls}">${bLabel}</span>
+              </div>
+              <div style="color:var(--text-dim); font-size:0.77rem; line-height:1.4;">${escEurusdHtml(a.thesis_summary || '')}</div>
+              <div style="display:flex; flex-wrap:wrap; gap:0.6rem; font-size:0.72rem; color:var(--text-muted); border-top:1px solid rgba(255,255,255,0.05); padding-top:0.35rem;">
+                ${kl.entry_zone ? `<span>🎯 <b>Entrada:</b> ${escEurusdHtml(kl.entry_zone)}</span>` : ''}
+                ${kl.invalidation_sl ? `<span style="color:var(--warn);">🛑 <b>SL:</b> ${escEurusdHtml(kl.invalidation_sl)}</span>` : ''}
+                ${kl.target_price ? `<span style="color:var(--primary);">🏁 <b>TP:</b> ${escEurusdHtml(kl.target_price)}</span>` : ''}
+              </div>
+              ${a.catalyst ? `<div style="font-size:0.71rem; color:var(--text-dim);">⚡ <i>Catalizador:</i> ${escEurusdHtml(a.catalyst)}</div>` : ''}
+            </div>
+          `;
+        }).join('');
+
+        bankBody.innerHTML = `
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:0.6rem; margin-bottom:0.85rem; padding:0.65rem 0.85rem; background:rgba(7,10,16,0.65); border-radius:7px; border:1px solid var(--border);">
+            <div>
+              <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Techo Institucional (100d SMA)</div>
+              <div style="font-size:0.88rem; font-weight:700; color:var(--warn);">${escEurusdHtml(bankMetrics.institutional_resistance_ceiling || '1.1280 - 1.1290')}</div>
+            </div>
+            <div>
+              <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Zona Venta Bancaria (Fade)</div>
+              <div style="font-size:0.88rem; font-weight:700; color:var(--text-main);">${escEurusdHtml(bankMetrics.bank_fade_sell_zone || '1.1220 - 1.1260')}</div>
+            </div>
+            <div>
+              <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Cluster Stops / Sweep</div>
+              <div style="font-size:0.88rem; font-weight:700; color:#ef4444;">${escEurusdHtml(bankMetrics.stops_invalidation_cluster || '1.1295 - 1.1300')}</div>
+            </div>
+            <div>
+              <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Imán de Liquidez (Target)</div>
+              <div style="font-size:0.88rem; font-weight:700; color:var(--primary);">${escEurusdHtml(bankMetrics.liquidity_target_magnet || '1.1100 - 1.1150')}</div>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap:0.75rem;">
+            ${cardsHtml}
+          </div>
+        `;
+      } else if (bankSec) {
+        bankSec.style.display = 'none';
       }
 
       // Calendar Today
@@ -4721,8 +6329,10 @@
             if (r.ok) {
               const d = await r.json();
               document.querySelectorAll('.eurusd-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'latest'));
+              const tabG = document.getElementById('eurusd-tab-daily-guide');
               const tabL = document.getElementById('eurusd-tab-latest');
               const tabH = document.getElementById('eurusd-tab-history');
+              if (tabG) tabG.style.display = 'none';
               if (tabL) tabL.style.display = 'flex';
               if (tabH) tabH.style.display = 'none';
               renderEurusdReport(d);

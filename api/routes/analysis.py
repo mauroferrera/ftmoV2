@@ -7,10 +7,47 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
+from core.bank_consensus import load_bank_analyses_data
+from core.daily_guide import compute_daily_guide
 from core.eurusd_spot_analysis_schema import count_consensus
 
 router = APIRouter(prefix="/api/analysis/eurusd-spot", tags=["analysis-eurusd-spot"])
 svc = EurUsdSpotAnalysisService()
+
+
+def _ensure_daily_guide(payload: Dict[str, Any]) -> None:
+    if not payload.get("daily_guide"):
+        p_val = (payload.get("price") or {}).get("current") or 1.1238
+        tech_data = payload.get("technical") or {}
+        smc_data = tech_data.get("smc_summary") or {}
+        pdh_val = smc_data.get("pdh")
+        pdl_val = smc_data.get("pdl")
+        payload["daily_guide"] = compute_daily_guide(
+            current_price=p_val,
+            pdh=pdh_val,
+            pdl=pdl_val,
+            calendar_events=payload.get("calendar_today"),
+        )
+
+
+@router.get("/daily-guide")
+def daily_guide_route() -> Dict[str, Any]:
+    """Retorna la Guía Operativa Diaria en vivo con niveles de PDH/PDL y 50% Equilibrium."""
+    row = svc.get_latest()
+    if row:
+        try:
+            payload = json.loads(row.get("payload_json") or "{}")
+            _ensure_daily_guide(payload)
+            return payload.get("daily_guide") or {}
+        except Exception:
+            pass
+    return compute_daily_guide(1.1238, 1.1275, 1.1205)
+
+
+@router.get("/bank-consensus")
+def bank_consensus() -> Dict[str, Any]:
+    """Retorna el meta-análisis y consenso estructurado de los top 10 bancos y analistas."""
+    return load_bank_analyses_data()
 
 
 @router.get("/latest")
@@ -22,6 +59,9 @@ def latest() -> Dict[str, Any]:
         payload = json.loads(row.get("payload_json") or "{}")
     except Exception:
         payload = {}
+    if not payload.get("bank_consensus"):
+        payload["bank_consensus"] = load_bank_analyses_data()
+    _ensure_daily_guide(payload)
     payload["_meta_db"] = {
         "id": row.get("id"),
         "run_key": row.get("run_key"),
@@ -44,6 +84,9 @@ def by_run(run_key: str = Query(...)) -> Dict[str, Any]:
         payload = json.loads(row.get("payload_json") or "{}")
     except Exception:
         payload = {}
+    if not payload.get("bank_consensus"):
+        payload["bank_consensus"] = load_bank_analyses_data()
+    _ensure_daily_guide(payload)
     payload["_meta_db"] = {
         "id": row.get("id"),
         "run_key": row.get("run_key"),

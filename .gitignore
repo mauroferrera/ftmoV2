@@ -20,11 +20,13 @@ docs/CHANGELOG_*.md
 *.backup-*
 backups/
 *autotrader_state.json
+database/*.csv
 
 # Datos y logs
 data/
 logs/
 *.log
+scratch/
 
 # Python
 __pycache__/

@@ -159,6 +159,25 @@ def _normalize_calendar_events(raw_events: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def validate_bank_consensus(raw: Any) -> Optional[Dict[str, Any]]:
+    """Valida y normaliza el bloque opcional de consenso de analistas y bancos institucionales."""
+    if not isinstance(raw, dict):
+        return None
+    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    analyses = raw.get("analyses") if isinstance(raw.get("analyses"), list) else []
+    return {
+        "metadata": metadata,
+        "analyses": analyses,
+    }
+
+
+def validate_daily_guide(raw: Any) -> Optional[Dict[str, Any]]:
+    """Valida y normaliza el bloque opcional de la Guía Operativa Diaria (PDH/PDL y 50% Equilibrium)."""
+    if not isinstance(raw, dict):
+        return None
+    return raw
+
+
 def validate_report(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Valida y normaliza el reporte. Lanza EurUsdSpotAnalysisError si inválido."""
     if not isinstance(payload, dict):
@@ -247,6 +266,8 @@ def validate_report(payload: Dict[str, Any]) -> Dict[str, Any]:
         "bias": bias,
         "confidence": int(confidence),
         "tribunal": tribunal,
+        "daily_guide": validate_daily_guide(payload.get("daily_guide")),
+        "bank_consensus": validate_bank_consensus(payload.get("bank_consensus")),
         "calendar_today": calendar_today,
         "fundamental": fundamental if isinstance(fundamental, list) else [],
         "technical": technical if isinstance(technical, dict) else {},

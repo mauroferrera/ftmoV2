@@ -166,6 +166,13 @@ def _monta_estaticos(app: FastAPI) -> None:
             return JSONResponse({"error": "falta static/index.html"}, status_code=503)
         return FileResponse(ruta)
 
+    @app.get("/db", response_model=None, include_in_schema=False)
+    def db_viewer() -> Any:
+        ruta = os.path.join(STATIC_DIR, "visor.html")
+        if not os.path.isfile(ruta):
+            return JSONResponse({"error": "falta static/visor.html"}, status_code=404)
+        return FileResponse(ruta)
+
 
 #: El objeto que Uvicorn carga: `uvicorn api.app:app`.
 app = create_app()
