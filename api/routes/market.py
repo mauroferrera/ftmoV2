@@ -191,6 +191,19 @@ def positions(
     return {"positions": lista, "count": len(lista)}
 
 
+@router.get("/orders", response_model=None)
+def orders(
+    symbol: Optional[str] = Query(None),
+    rt: Any = Depends(deps.runtime),
+    account: Optional[str] = Query(
+        None, description="login MT5 de la cuenta (varias cuentas)"),
+) -> Dict[str, Any]:
+    """Órdenes límite y pendientes en MT5, todas o filtradas por símbolo."""
+    svc = deps.market_service(deps.runtime_para_cuenta(rt, account))
+    lista: List[Dict[str, Any]] = svc.orders(symbol)
+    return {"orders": lista, "count": len(lista)}
+
+
 @router.get("/institutional-volume", response_model=None)
 def institutional_volume(
     symbol: str = Query(DEFAULT_SYMBOL),

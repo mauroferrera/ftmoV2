@@ -233,7 +233,10 @@ ESCRITURAS = [
 def test_la_lectura_no_pide_token(monkeypatch):
     with _client(token="secreto", monkeypatch=monkeypatch) as c:
         r = c.get("/api/positions")
-    assert r.status_code == 200
+        assert r.status_code == 200
+        r_ord = c.get("/api/orders")
+        assert r_ord.status_code == 200
+        assert "orders" in r_ord.json()
 
 
 def test_las_escrituras_piden_token(monkeypatch):

@@ -147,6 +147,13 @@ class MarketService:
         """Posiciones abiertas. `[]` es una respuesta legítima: no tener ninguna."""
         return self._adapter.positions(symbol)
 
+    def orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Órdenes pendientes. `[]` es una respuesta legítima: no tener ninguna."""
+        fn = getattr(self._adapter, "orders", None)
+        if not callable(fn):
+            return []
+        return fn(symbol)
+
     def history_deals(
         self,
         days: int = 30,

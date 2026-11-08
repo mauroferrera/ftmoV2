@@ -206,6 +206,21 @@ def get_positions(
     return {"positions": list(filas or [])}
 
 
+@router.get("/api/orders", response_model=None)
+def get_orders(
+    magic: Optional[int] = None,
+    symbol: Optional[str] = None,
+    rt: Any = Depends(deps.runtime),
+    account: Optional[str] = Query(
+        None, description="login MT5 de la cuenta (varias cuentas)"),
+) -> Dict[str, Any]:
+    """Las órdenes límite y pendientes en MT5, filtradas opcionalmente por `magic` o `symbol`."""
+    filas, error = _servicio(rt, account).orders(magic=magic, symbol=symbol)
+    if error:
+        raise HTTPException(status_code=503, detail={"error": error})
+    return {"orders": list(filas or [])}
+
+
 @router.post("/api/positions/{ticket}/close", response_model=None)
 def post_close_position(
     ticket: int,

@@ -629,6 +629,18 @@ class MT5ForexAdapter:
 
         return self._session.call(_get, account=self._account_id)
 
+    def orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Órdenes pendientes en MT5, normalizadas. Vacío si no hay ninguna."""
+        simbolo = str(symbol or "").strip().upper() if symbol else None
+
+        def _get(mt5) -> List[Dict[str, Any]]:
+            crudas = (
+                mt5.orders_get(symbol=simbolo) if simbolo else mt5.orders_get()
+            )
+            return [_fila_order(o) for o in filas_o_vacias(crudas)]
+
+        return self._session.call(_get, account=self._account_id)
+
     def history_deals(
         self,
         days: int = 30,
@@ -716,6 +728,37 @@ def _fila_posicion(pos: Any) -> Dict[str, Any]:
         "magic": int(getattr(pos, "magic", 0) or 0),
         "comment": str(getattr(pos, "comment", "") or ""),
         "time": int(getattr(pos, "time", 0) or 0),
+    }
+
+
+def _fila_order(order: Any) -> Dict[str, Any]:
+    """Orden pendiente de MT5 -> dict normalizado."""
+    t = int(getattr(order, "type", 0) or 0)
+    type_map = {
+        0: "BUY",
+        1: "SELL",
+        2: "BUY_LIMIT",
+        3: "SELL_LIMIT",
+        4: "BUY_STOP",
+        5: "SELL_STOP",
+        6: "BUY_STOP_LIMIT",
+        7: "SELL_STOP_LIMIT",
+    }
+    type_str = type_map.get(t, f"TYPE_{t}")
+    return {
+        "ticket": int(getattr(order, "ticket", 0) or 0),
+        "symbol": str(getattr(order, "symbol", "") or ""),
+        "type": type_str,
+        "type_raw": t,
+        "volume": float(getattr(order, "volume_current", getattr(order, "volume_initial", 0.0)) or 0.0),
+        "price_open": float(getattr(order, "price_open", 0.0) or 0.0),
+        "price_current": float(getattr(order, "price_current", 0.0) or 0.0),
+        "sl": float(getattr(order, "sl", 0.0) or 0.0),
+        "tp": float(getattr(order, "tp", 0.0) or 0.0),
+        "state": int(getattr(order, "state", 0) or 0),
+        "magic": int(getattr(order, "magic", 0) or 0),
+        "comment": str(getattr(order, "comment", "") or ""),
+        "time_setup": int(getattr(order, "time_setup", 0) or 0),
     }
 
 

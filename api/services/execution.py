@@ -1290,6 +1290,33 @@ class ExecutionService:
                     fila["management_error"] = str(exc)
         return salidas, None
 
+    # -- órdenes pendientes ------------------------------------------------------
+
+    @_con_cuenta
+    def orders(self, magic: Optional[int] = None,
+               symbol: Optional[str] = None
+               ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+        """`(filas, error)`: órdenes pendientes en MT5, filtradas por `magic` y/o `symbol` si se pasan."""
+        if self._execution is None:
+            return [], None
+        fn = getattr(self._execution, "orders", None)
+        if not callable(fn):
+            return [], None
+        try:
+            filas = fn(symbol=symbol) if symbol else fn()
+        except Exception as exc:  # noqa: BLE001
+            return None, "No se pudieron leer las órdenes pendientes: {0}".format(exc)
+        if not isinstance(filas, (list, tuple)):
+            return [], None
+        salidas = [dict(f) for f in filas]
+        if magic is not None:
+            objetivo = int(magic)
+            salidas = [f for f in salidas if int(f.get("magic") or 0) == objetivo]
+        if symbol:
+            sym_clean = str(symbol).strip().upper()
+            salidas = [f for f in salidas if str(f.get("symbol") or "").strip().upper() == sym_clean]
+        return salidas, None
+
 
 def _float_or_none(value: Any) -> Optional[float]:
     """`float(value)` o `None` si no es un número utilizable (incluido 0.0 → 0.0)."""
