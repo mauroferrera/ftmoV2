@@ -334,6 +334,87 @@ class AutoTraderService:
 
         return managed_list
 
+    def _check_triple_confluence(
+        self,
+        symbol: str,
+        direction: str,
+        planned_entry: Optional[float],
+        current_price: Optional[float],
+        momento: datetime,
+        killzone_info: Optional[Any] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Aplica el Filtro de Triple Confluencia institucional:
+        
+        1. Consenso Web / Bancario favorable y Tribunal Macro EUR/USD alineado (sin VETO).
+        2. Ventana de Killzone activa (Londres 07:00-10:00 UTC o NY 12:30-15:30 UTC).
+        3. Mitigación / Toque de la zona (OB/FVG/OTE): no perseguir velas lejanas.
+        """
+        # 1. Ventana de Killzone
+        in_kz = False
+        if isinstance(killzone_info, dict):
+            in_kz = bool(killzone_info.get("in_killzone"))
+        elif isinstance(killzone_info, str) and killzone_info:
+            in_kz = True
+
+        if not in_kz:
+            from core import risk_engine
+            kz_res = risk_engine.killzone_score(now=momento)
+            in_kz = bool(kz_res.get("in_killzone"))
+
+        if not in_kz:
+            return False, "Fuera de Killzone (requiere Londres 07-10 UTC o NY 12:30-15:30 UTC)"
+
+        # 2. Tribunal Macro y Consenso Web / Bancos (EURUSD)
+        sym_clean = str(symbol or "").upper().replace("/", "")
+        if sym_clean == "EURUSD":
+            try:
+                import json
+                from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
+                spot = EurUsdSpotAnalysisService().get_latest()
+                if spot:
+                    payload = json.loads(spot.get("payload_json") or "{}")
+                    trib = payload.get("tribunal") if isinstance(payload, dict) else {}
+                    t_verdict = trib.get("verdict") if isinstance(trib, dict) and isinstance(trib.get("verdict"), dict) else {}
+                    v_status = str(t_verdict.get("status") or "").upper()
+                    if v_status == "VETO":
+                        return False, "VETO del Tribunal Macro EUR/USD (evento o alto riesgo)"
+
+                    b_bull = int(spot.get("consensus_bull") or 0)
+                    b_bear = int(spot.get("consensus_bear") or 0)
+                    b_neut = int(spot.get("consensus_neutral") or 0)
+                    total_sources = b_bull + b_bear + b_neut
+                    if direction == "BUY" and total_sources > 0 and b_bear > b_bull:
+                        return False, f"Consenso Web mayoritariamente bajista ({b_bear} vs {b_bull} bull)"
+                    if direction == "SELL" and total_sources > 0 and b_bull > b_bear:
+                        return False, f"Consenso Web mayoritariamente alcista ({b_bull} vs {b_bear} bear)"
+
+                    macro_bias = str(spot.get("bias") or "").lower()
+                    if direction == "BUY" and macro_bias == "bajista":
+                        return False, "Tribunal Macro con sesgo bajista opuesto a BUY"
+                    if direction == "SELL" and macro_bias == "alcista":
+                        return False, "Tribunal Macro con sesgo alcista opuesto a SELL"
+            except Exception as exc:
+                log.debug("No se pudo evaluar confluencia macro para %s: %s", symbol, exc)
+
+        # 3. Mitigación / Toque de la zona (no perseguir precio)
+        if planned_entry is not None and current_price is not None:
+            pe = float(planned_entry)
+            cp = float(current_price)
+            is_jpy = "JPY" in sym_clean
+            pip_size = 0.01 if is_jpy else 0.00010
+            max_drift_pips = 3.5
+
+            if direction == "BUY":
+                drift_pips = (cp - pe) / pip_size
+                if drift_pips > max_drift_pips:
+                    return False, f"Precio alejado de la zona (+{drift_pips:.1f} pips). Esperando retroceso a OB/OTE"
+            elif direction == "SELL":
+                drift_pips = (pe - cp) / pip_size
+                if drift_pips > max_drift_pips:
+                    return False, f"Precio alejado de la zona (-{drift_pips:.1f} pips). Esperando retroceso a OB/OTE"
+
+        return True, None
+
     def _evaluate_and_execute_entries(self, momento: datetime) -> List[Dict[str, Any]]:
         """Escanea setups en M15. Si están aprobados por el gate, envía orden a mercado."""
         executed: List[Dict[str, Any]] = []
@@ -388,6 +469,10 @@ class AutoTraderService:
             except Exception as exc:
                 log.debug("No se pudieron consultar estados activos adicionales: %s", exc)
 
+        cfg_exec = getattr(exec_svc, "_cfg", None)
+        cfg = cfg_exec() if callable(cfg_exec) else {}
+        use_triple_confluence = bool(cfg.get("autotrader_triple_confluence", False))
+
         now_mono = time.monotonic()
         for ev in candidatos:
             symbol = ev.get("symbol")
@@ -403,6 +488,29 @@ class AutoTraderService:
             if now_mono < cd:
                 log.debug("Símbolo %s en cooldown tras rechazo previo (%ds restantes)", symbol, int(cd - now_mono))
                 continue
+
+            # Filtro de Triple Confluencia (Web Consensus + Tribunal no VETO + Killzone + Mitigación de Zona)
+            if use_triple_confluence and not ev.get("force"):
+                current_p = None
+                try:
+                    p_info = market_svc.price(symbol)
+                    if p_info:
+                        current_p = p_info.get("ask") if direction == "BUY" else p_info.get("bid")
+                except Exception:
+                    pass
+
+                passed, rej_reason = self._check_triple_confluence(
+                    symbol=symbol,
+                    direction=direction,
+                    planned_entry=ev.get("entry"),
+                    current_price=current_p,
+                    momento=momento,
+                    killzone_info=ev.get("killzone"),
+                )
+                if not passed:
+                    self._last_rejection = f"[{symbol}] {rej_reason}"
+                    log.info("AutoTrader descarta setup: %s", self._last_rejection)
+                    continue
 
             log.info("Setup APROBADO detectado por AutoTrader: %s %s (Score %.1f)", symbol, direction, score)
 

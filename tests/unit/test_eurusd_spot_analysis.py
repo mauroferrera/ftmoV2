@@ -529,3 +529,13 @@ def test_analysis_run_route_does_not_require_token(tmp_path, monkeypatch):
     assert hist.status_code == 200
     assert hist.json()["count"] == 1
     assert "verdict_status" in hist.json()["items"][0]
+
+    # Endpoint de Auditoría y Scorecard
+    audit_res = client.get("/api/analysis/eurusd-spot/audit-metrics")
+    assert audit_res.status_code == 200
+    metrics = audit_res.json()
+    assert "total_runs" in metrics
+    assert "accuracy_4h" in metrics
+    assert "web_consensus_accuracy_4h" in metrics
+    assert "key_takeaways" in metrics
+    assert len(metrics["key_takeaways"]) > 0

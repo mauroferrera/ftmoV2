@@ -36,6 +36,9 @@ execution:
   # magic no es de este sistema y no se audita como suyo.
   magic: 8882026
   comment: "FTMO Copilot"
+  # Filtro de Triple Confluencia para AutoTrader: Consenso Web >50%, Tribunal no en VETO,
+  # Killzone activa (Londres/NY) y precio mitigando la zona OB/FVG/OTE (no persecución).
+  autotrader_triple_confluence: true
   # Distancia del SL en UNIDADES DE PRECIO (no pips): 12 pips en EURUSD son
   # 0.0012; en USDJPY, 12 pips son 0.12; en oro, 12 PUNTOS son 0.12 y 12 pips
   # serían 1.2. `sl_distance_by_symbol` manda sobre el global: cualquier

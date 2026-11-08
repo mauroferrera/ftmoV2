@@ -130,6 +130,23 @@ def _caja(z: Any, suffix: str) -> Optional[Dict[str, Any]]:
     return {"bottom": bottom, "top": top, "kind": kind}
 
 
+def determine_order_type(direction: str,
+                         current_price: Optional[float],
+                         entry_price: Optional[float],
+                         has_zone: bool = True) -> str:
+    """Tipo de orden: LIMIT para entrar en retroceso a la zona, MARKET si ya está dentro o sin zona."""
+    dir_clean = str(direction or "").strip().upper()
+    cp = _num(current_price)
+    ep = _num(entry_price)
+    if not has_zone or cp is None or ep is None:
+        return dir_clean
+    if dir_clean == "BUY":
+        return "BUY_LIMIT" if cp > ep + 1e-6 else "BUY"
+    if dir_clean == "SELL":
+        return "SELL_LIMIT" if cp < ep - 1e-6 else "SELL"
+    return dir_clean
+
+
 def entry_zone(patterns: Optional[Dict[str, Any]],
                price: Optional[float],
                direction: str,
@@ -330,6 +347,8 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     if entry is None:
         entry = price  # sin zona en eje: entrada a mercado al precio actual
     entry_kind = "market" if elegida is None else "zone"
+    order_type = determine_order_type(direction, price, entry, has_zone=(elegida is not None))
+    is_limit_order = order_type in ("BUY_LIMIT", "SELL_LIMIT")
     zone_too_far = zone.get("reason") == ZONE_TOO_FAR
 
     digits = _spec_attr(spec, "digits", 6)
@@ -420,6 +439,8 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     return {
         "symbol": symbol,
         "direction": direction,
+        "order_type": order_type,
+        "is_limit_order": is_limit_order,
         "score": score_effective,
         "base_score": base_score,
         "htf_score_bonus": htf_bonus,
@@ -466,6 +487,7 @@ __all__ = [
     "ZONE_NO_AXIS",
     "ZONE_OK",
     "ZONE_TOO_FAR",
+    "determine_order_type",
     "entry_zone",
     "evaluate_gate",
     "killzone_forced_now",

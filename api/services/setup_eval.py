@@ -96,23 +96,26 @@ def evaluate(snapshot: Dict[str, Any],
     view: Optional[Dict[str, Any]] = None
     last_time = snap.get("last_time")
 
+    order_type = gate.get("order_type") or direction
+    is_limit_order = bool(gate.get("is_limit_order"))
+
     if gate["approved"] and None not in (entry, sl, tp):
         arriba = direction == "BUY"
         color = COLOR_ENTRADA_BUY if arriba else COLOR_ENTRADA_SELL
         echarts["markPoint"].append({
             "coord": [last_time, entry],
-            "value": "{0} {1:.5f}".format(direction, entry),
+            "value": "{0} {1:.5f}".format(order_type, entry),
             "symbol": "pin",
             "symbolSize": 26,
             "symbolOffset": [0, -8] if arriba else [0, 8],
             "itemStyle": {"color": color, "borderColor": "#fff"},
             "label": {
                 "show": True, "color": "#fff", "fontSize": 10,
-                "fontWeight": 700, "formatter": direction,
+                "fontWeight": 700, "formatter": order_type,
             },
         })
         for valor, texto, estilo in (
-            (entry, "Entry", {"color": color, "width": 1.5, "type": "dashed", "opacity": 0.8}),
+            (entry, f"Entry ({order_type})" if is_limit_order else "Entry", {"color": color, "width": 1.5, "type": "dashed", "opacity": 0.8}),
             (sl, "SL", {"color": COLOR_SL, "width": 1.5, "type": "dashed"}),
             (tp, "TP", {"color": COLOR_TP, "width": 1.5, "type": "dashed"}),
         ):
@@ -138,6 +141,8 @@ def evaluate(snapshot: Dict[str, Any],
         "symbol": gate["symbol"],
         "timeframe": snap.get("timeframe"),
         "direction": direction,
+        "order_type": order_type,
+        "is_limit_order": is_limit_order,
         "score": gate["score"],
         "verdict": gate["verdict"],
         "current_price": gate["current_price"],

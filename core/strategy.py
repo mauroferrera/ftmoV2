@@ -87,6 +87,7 @@ DEFAULTS: Dict[str, Any] = {
     "max_total_open_risk_r": 1.5,
     "buffer_protection_enabled": True,
     "buffer_protection_divisor": 2.0,
+    "autotrader_triple_confluence": True,
     # Score. `min_score` y `risk_weights` se leen de `risk_engine` y no se duplican:
     # antes este archivo, `risk_engine` y el YAML tenían tres juegos distintos de
     # pesos y cuatro umbrales. La calibración de producción vive solo en el YAML.
@@ -141,6 +142,7 @@ def _spec_for(key: str) -> Optional[Tuple[str, Optional[float], Optional[float]]
         "max_total_open_risk_r": (_NUMBER, 0.0, None),
         "buffer_protection_enabled": (_BOOLEAN, None, None),
         "buffer_protection_divisor": (_NUMBER, 0.1, None),
+        "autotrader_triple_confluence": (_BOOLEAN, None, None),
     }
     return table.get(key)
 
@@ -313,6 +315,7 @@ def build_flat(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "max_total_open_risk_r": (d, "max_total_open_risk_r"),
         "buffer_protection_enabled": (d, "buffer_protection_enabled"),
         "buffer_protection_divisor": (d, "buffer_protection_divisor"),
+        "autotrader_triple_confluence": (e, "autotrader_triple_confluence"),
         "magic": (e, "magic"),
         "comment": (e, "comment"),
         "sl_distance": (e, "sl_distance"),

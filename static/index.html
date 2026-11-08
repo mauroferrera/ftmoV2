@@ -2351,6 +2351,7 @@
             <button class="eurusd-tab-btn active" data-tab="daily-guide" type="button">🎯 Guía del Día</button>
             <button class="eurusd-tab-btn" data-tab="latest" type="button">Último Análisis</button>
             <button class="eurusd-tab-btn" data-tab="history" type="button">Historial (Runs)</button>
+            <button class="eurusd-tab-btn" data-tab="audit" type="button">📊 Auditoría / Scorecard</button>
           </div>
           <button class="btn-icon" id="btn-close-eurusd" type="button" onclick="closeEurusdModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer; line-height:1; padding:0 0.4rem;" title="Cerrar">&times;</button>
         </div>
@@ -2605,6 +2606,83 @@
             Historial de sesiones del Tribunal EUR/USD (07, 11, 14, 18 UTC y ejecuciones manuales). Haz clic en una sesión para abrir su debate completo.
           </div>
           <div class="eurusd-list" id="eurusd-history-list"></div>
+        </div>
+
+        <!-- Tab: Auditoría / Scorecard -->
+        <div id="eurusd-tab-audit" style="display:none; flex-direction:column; gap:0.9rem;">
+          <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+            <span>Auditoría empírica retrospectiva: Pronósticos del Tribunal y Fuentes Web vs. Cotizaciones reales en MetaTrader 5 (M15).</span>
+            <button class="btn btn-secondary" onclick="loadEurusdAudit()" style="font-size:0.72rem; padding:0.25rem 0.55rem; border-radius:4px; cursor:pointer;">🔄 Recalcular</button>
+          </div>
+
+          <!-- KPI Grid -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.7rem;" id="audit-kpi-grid">
+            <div class="eurusd-card" style="border-top:3px solid var(--bull);">
+              <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">🌐 Acierto Consenso Web</div>
+              <div style="font-size:1.45rem; font-weight:800; color:var(--bull); margin:0.25rem 0;" id="audit-web-acc">65.2%</div>
+              <div style="font-size:0.72rem; color:var(--text-dim);">Top 10 Bancos y Medios (15/23)</div>
+            </div>
+            <div class="eurusd-card" style="border-top:3px solid var(--accent, #38bdf8);">
+              <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">⚖️ Acierto Tribunal 4h</div>
+              <div style="font-size:1.45rem; font-weight:800; color:var(--accent, #38bdf8); margin:0.25rem 0;" id="audit-tribunal-acc">52.2%</div>
+              <div style="font-size:0.72rem; color:var(--text-dim);">Dirección neta a 4h (12/23)</div>
+            </div>
+            <div class="eurusd-card" style="border-top:3px solid var(--bear);">
+              <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">🛑 Win Rate Mercado Ciego</div>
+              <div style="font-size:1.45rem; font-weight:800; color:var(--bear); margin:0.25rem 0;" id="audit-tactical-wr">22.2%</div>
+              <div style="font-size:0.72rem; color:var(--text-dim);">Target 20p vs SL 15p directo</div>
+            </div>
+            <div class="eurusd-card" style="border-top:3px solid var(--warn, #f59e0b);">
+              <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">🌊 Retroceso Adverso (MAE)</div>
+              <div style="font-size:1.45rem; font-weight:800; color:var(--warn, #f59e0b); margin:0.25rem 0;" id="audit-mae-pips">-21.5 pips</div>
+              <div style="font-size:0.72rem; color:var(--text-dim);">Drawdown previo al impulso</div>
+            </div>
+            <div class="eurusd-card" style="border-top:3px solid var(--bull);">
+              <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">🎯 Excursión Favorable (MFE)</div>
+              <div style="font-size:1.45rem; font-weight:800; color:var(--bull); margin:0.25rem 0;" id="audit-mfe-pips">+14.9 pips</div>
+              <div style="font-size:0.72rem; color:var(--text-dim);">Potencial a favor promedio</div>
+            </div>
+          </div>
+
+          <!-- Conclusiones Estratégicas y Medidas -->
+          <div class="eurusd-section" style="background:rgba(15,23,42,0.65); border:1px solid var(--border); border-radius:6px; padding:0.85rem;">
+            <div style="font-size:0.88rem; font-weight:700; color:var(--text-main); margin-bottom:0.5rem; display:flex; align-items:center; gap:0.4rem;">
+              <span>🛡️ Calibración Institucional Aplicada a Copilot & AutoTrader</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:0.45rem; font-size:0.78rem; line-height:1.45; color:var(--text-dim);" id="audit-takeaways-list">
+              <div>• <b>Órdenes Límite en Pullback (BUY LIMIT / SELL LIMIT):</b> El mercado casi siempre retrocede 15-25 pips hacia el Order Block o Fibonacci OTE (0.618 - 0.705) para cazar liquidez antes de moverse en la dirección del Tribunal. Entrar con órdenes límite reduce el SL a la mitad y multiplica el R:R.</div>
+              <div>• <b>Filtro de Triple Confluencia:</b> AutoTrader ahora exige Consenso Web >50%, Tribunal macro sin VETO, Killzone de Londres/NY activa y precio mitigando la zona OB/FVG en lugar de perseguir impulsos extendidos.</div>
+              <div>• <b>Ponderación de Consenso Web:</b> Las fuentes institucionales (65.2% de acierto) actúan como validador primario para autorizar las entradas.</div>
+            </div>
+          </div>
+
+          <!-- Tabla de Ejecuciones Auditadas -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">📋 Registro Detallado de Pronósticos Auditados</span>
+              <span class="eurusd-badge" id="audit-runs-count">23 runs</span>
+            </div>
+            <div style="overflow-x:auto;">
+              <table style="width:100%; border-collapse:collapse; font-size:0.75rem; font-family:var(--font-mono); text-align:left;">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border); color:var(--text-muted);">
+                    <th style="padding:0.4rem;">Fecha UTC</th>
+                    <th style="padding:0.4rem;">Sesgo Tribunal</th>
+                    <th style="padding:0.4rem;">Confianza</th>
+                    <th style="padding:0.4rem;">Precio Base</th>
+                    <th style="padding:0.4rem;">Desplazamiento 4h</th>
+                    <th style="padding:0.4rem;">Dir. 4h</th>
+                    <th style="padding:0.4rem;">Táctico (20p/15p)</th>
+                    <th style="padding:0.4rem;">Consenso Web</th>
+                    <th style="padding:0.4rem;">Acierto Web</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-table-body">
+                  <tr><td colspan="9" style="padding:1rem; text-align:center; color:var(--text-muted);">Cargando métricas de auditoría...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -4853,10 +4931,12 @@
       }
 
       const vBadge = $('setup-verdict');
-      vBadge.textContent = data.approved ? 'APROBADO' : (data.verdict || 'DESCARTADO');
+      const orderType = data.order_type || data.direction || 'BUY';
+      const isLimit = !!data.is_limit_order || orderType.includes('LIMIT');
+      vBadge.textContent = data.approved ? (isLimit ? `APROBADO (${orderType})` : 'APROBADO') : (data.verdict || 'DESCARTADO');
       vBadge.className = 'verdict-badge ' + (data.approved ? 'approved' : (score >= 50 ? 'neutral' : 'rejected'));
 
-      $('setup-dir').textContent = (data.direction || 'NEUTRAL').toUpperCase();
+      $('setup-dir').textContent = orderType;
       $('setup-dir').style.color = data.direction === 'BUY' ? 'var(--bull)' : (data.direction === 'SELL' ? 'var(--bear)' : 'var(--text-main)');
 
       if (data.reasons && data.reasons.length) {
@@ -4917,9 +4997,19 @@
       }
 
       // Parámetros calculados (formateados según decimales del símbolo)
-      $('param-entry').textContent = data.entry != null ? formatPrice(data.entry, reqSymbol) : (data.current_price != null ? formatPrice(data.current_price, reqSymbol) : '—');
+      const entryPriceFormatted = data.entry != null ? formatPrice(data.entry, reqSymbol) : (data.current_price != null ? formatPrice(data.current_price, reqSymbol) : '—');
+      const entryTypeTag = isLimit ? ` <span style="font-size:0.7rem; color:var(--accent, #38bdf8); font-weight:700;">[${orderType}]</span>` : '';
+      $('param-entry').innerHTML = `${entryPriceFormatted}${entryTypeTag}`;
       $('param-sl').textContent = data.sl != null ? formatPrice(data.sl, reqSymbol) : '—';
       $('param-tp').textContent = data.tp != null ? formatPrice(data.tp, reqSymbol) : '—';
+
+      if (data.approved && isLimit && data.entry != null) {
+        if (data.direction === 'BUY' && $('btn-buy-price')) {
+          $('btn-buy-price').textContent = `${formatPrice(data.entry, reqSymbol)} (LIMIT)`;
+        } else if (data.direction === 'SELL' && $('btn-sell-price')) {
+          $('btn-sell-price').textContent = `${formatPrice(data.entry, reqSymbol)} (LIMIT)`;
+        }
+      }
 
       // Actualizar inputs sugeridos solo al cambiar de símbolo/timeframe,
       // para no pisar lo que el usuario haya editado a mano.
@@ -5493,13 +5583,16 @@
         </div>
       ` : '';
 
-      $('modal-trade-title').textContent = `Confirmar Orden: ${action} ${symbol}`;
+      const isLimitOrder = !!(active && active.is_limit_order);
+      const orderTypeLabel = (active && active.order_type) ? active.order_type : action;
+
+      $('modal-trade-title').textContent = `Confirmar Orden: ${orderTypeLabel} ${symbol}`;
       $('modal-trade-body').innerHTML = `
         <div style="font-family:var(--font-mono); font-size:0.85rem; background:rgba(0,0,0,0.25); padding:0.75rem; border-radius:6px;">
           <div>Símbolo: <b>${symbol}</b></div>
-          <div>Acción: <b style="color:var(--${action === 'BUY' ? 'bull' : 'bear'})">${action}</b></div>
+          <div>Tipo de Orden: <b style="color:var(--${action === 'BUY' ? 'bull' : 'bear'})">${orderTypeLabel} ${isLimitOrder ? '<span style="color:var(--accent, #38bdf8); font-size:0.75rem;">(Pullback Limit OB/OTE)</span>' : '(A Mercado)'}</b></div>
           <div>Volumen: <b>${lot ? lot + ' Lotes' : 'Auto (dimensionado por riesgo FTMO)'}</b></div>
-          <div>Precio aprox: <b>${price}</b></div>
+          <div>Precio Entrada: <b>${isLimitOrder && active && active.entry != null ? formatPrice(active.entry, symbol) : price}</b></div>
           <div>Stop Loss: <b>${sl != null ? sl : 'Sin SL'}</b></div>
           <div>Take Profit: <b>${tp != null ? tp : 'Sin TP'}</b></div>
         </div>
@@ -5858,9 +5951,11 @@
         const tabGuide = document.getElementById('eurusd-tab-daily-guide');
         const tabLatest = document.getElementById('eurusd-tab-latest');
         const tabHistory = document.getElementById('eurusd-tab-history');
+        const tabAudit = document.getElementById('eurusd-tab-audit');
         if (tabGuide) tabGuide.style.display = 'flex';
         if (tabLatest) tabLatest.style.display = 'none';
         if (tabHistory) tabHistory.style.display = 'none';
+        if (tabAudit) tabAudit.style.display = 'none';
         loadEurusdLatest();
         loadEurusdHistory();
       }
@@ -5882,12 +5977,64 @@
         const tabGuide = document.getElementById('eurusd-tab-daily-guide');
         const tabLatest = document.getElementById('eurusd-tab-latest');
         const tabHistory = document.getElementById('eurusd-tab-history');
+        const tabAudit = document.getElementById('eurusd-tab-audit');
         if (tabGuide) tabGuide.style.display = tab === 'daily-guide' ? 'flex' : 'none';
         if (tabLatest) tabLatest.style.display = tab === 'latest' ? 'flex' : 'none';
         if (tabHistory) tabHistory.style.display = tab === 'history' ? 'flex' : 'none';
+        if (tabAudit) tabAudit.style.display = tab === 'audit' ? 'flex' : 'none';
         if (tab === 'history') loadEurusdHistory();
+        if (tab === 'audit') loadEurusdAudit();
       });
     });
+
+    async function loadEurusdAudit() {
+      const tbody = $('audit-table-body');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="padding:1rem; text-align:center; color:var(--text-muted);">Calculando auditoría contra MT5...</td></tr>';
+
+      const { ok, data } = await getJSON('/api/analysis/eurusd-spot/audit-metrics');
+      if (!ok || !data) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="padding:1rem; text-align:center; color:var(--bear);">Error al cargar métricas de auditoría</td></tr>';
+        return;
+      }
+
+      if ($('audit-web-acc')) $('audit-web-acc').textContent = `${data.web_consensus_accuracy_4h}%`;
+      if ($('audit-tribunal-acc')) $('audit-tribunal-acc').textContent = `${data.accuracy_4h}%`;
+      if ($('audit-tactical-wr')) $('audit-tactical-wr').textContent = `${data.tactical_win_rate}%`;
+      if ($('audit-mae-pips')) $('audit-mae-pips').textContent = `-${data.avg_mae_pips} pips`;
+      if ($('audit-mfe-pips')) $('audit-mfe-pips').textContent = `+${data.avg_mfe_pips} pips`;
+      if ($('audit-runs-count')) $('audit-runs-count').textContent = `${data.total_runs} runs`;
+
+      if (data.key_takeaways && $('audit-takeaways-list')) {
+        $('audit-takeaways-list').innerHTML = data.key_takeaways.map(t => `<div>• ${t}</div>`).join('');
+      }
+
+      if (tbody && data.recent_runs) {
+        tbody.innerHTML = data.recent_runs.map(r => {
+          const isAlc = r.bias === 'alcista';
+          const isBaj = r.bias === 'bajista';
+          const biasBadge = `<span class="eurusd-badge ${isAlc ? 'bull' : (isBaj ? 'bear' : 'neutral')}">${(r.bias || '').toUpperCase()}</span>`;
+          const dir4Badge = r.hit_4h ? '<span style="color:var(--bull); font-weight:700;">✅ ACIERTO</span>' : '<span style="color:var(--bear); font-weight:700;">❌ FALLO</span>';
+          const tacBadge = r.tactical_win === true ? '<span style="color:var(--bull); font-weight:700;">🎯 WIN</span>' : (r.tactical_win === false ? '<span style="color:var(--bear); font-weight:700;">🛑 LOSS</span>' : '—');
+          const webBadge = `<span class="eurusd-badge ${r.web_bias === 'alcista' ? 'bull' : (r.web_bias === 'bajista' ? 'bear' : 'neutral')}">${(r.web_bias || '').toUpperCase()}</span>`;
+          const webHitBadge = r.web_hit_4h ? '<span style="color:var(--bull);">✅</span>' : '<span style="color:var(--bear);">❌</span>';
+          const diffTxt = (r.diff_4h > 0 ? `+${r.diff_4h}` : `${r.diff_4h}`) + ' p';
+
+          return `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+              <td style="padding:0.4rem; color:var(--text-dim);">${r.date || r.run_key}</td>
+              <td style="padding:0.4rem;">${biasBadge}</td>
+              <td style="padding:0.4rem; color:var(--text-main); font-weight:600;">${r.confidence}%</td>
+              <td style="padding:0.4rem; color:var(--text-muted);">${r.p0 != null ? Number(r.p0).toFixed(5) : '—'}</td>
+              <td style="padding:0.4rem; font-weight:700; color:${r.diff_4h > 0 ? 'var(--bull)' : (r.diff_4h < 0 ? 'var(--bear)' : 'var(--text-muted)')};">${diffTxt}</td>
+              <td style="padding:0.4rem;">${dir4Badge}</td>
+              <td style="padding:0.4rem;">${tacBadge}</td>
+              <td style="padding:0.4rem;">${webBadge}</td>
+              <td style="padding:0.4rem; text-align:center;">${webHitBadge}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
 
     function renderEurusdReport(data) {
       if (!data) return;

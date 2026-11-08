@@ -186,3 +186,49 @@ def test_autotrader_rejection_backoff_and_persistence(monkeypatch, tmp_path):
 
     asyncio.run(_test())
 
+
+def test_autotrader_triple_confluence_filter():
+    from datetime import datetime, timezone
+    from api.services.autotrader import AutoTraderService
+
+    svc = AutoTraderService()
+
+    # 1. Fuera de Killzone (ej. 03:00 UTC) -> Rechazado
+    fuera_kz = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)
+    ok, reason = svc._check_triple_confluence(
+        symbol="EURUSD",
+        direction="BUY",
+        planned_entry=1.1200,
+        current_price=1.1200,
+        momento=fuera_kz,
+        killzone_info=None,
+    )
+    assert ok is False
+    assert "Killzone" in reason
+
+    # 2. Dentro de Killzone (08:00 UTC) pero precio alejado de la zona (+10 pips) -> Rechazado
+    dentro_kz = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)
+    ok_drift, reason_drift = svc._check_triple_confluence(
+        symbol="GBPUSD",
+        direction="BUY",
+        planned_entry=1.2800,
+        current_price=1.2810,  # 10 pips arriba
+        momento=dentro_kz,
+        killzone_info={"in_killzone": True},
+    )
+    assert ok_drift is False
+    assert "alejado" in reason_drift
+
+    # 3. Dentro de Killzone y precio en la zona (1.1201 vs 1.1200 = 1 pip) -> Aprobado
+    ok_pass, reason_pass = svc._check_triple_confluence(
+        symbol="USDJPY",
+        direction="BUY",
+        planned_entry=155.00,
+        current_price=155.01,
+        momento=dentro_kz,
+        killzone_info={"in_killzone": True},
+    )
+    assert ok_pass is True
+    assert reason_pass is None
+
+

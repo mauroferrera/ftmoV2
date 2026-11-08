@@ -50,6 +50,14 @@ def bank_consensus() -> Dict[str, Any]:
     return load_bank_analyses_data()
 
 
+@router.get("/audit-metrics")
+def audit_metrics(request: Request) -> Dict[str, Any]:
+    """Retorna el scorecard empírico de acierto del Tribunal y Consenso Web frente a MT5."""
+    rt = getattr(request.app.state, "runtime", None) if hasattr(request, "app") else None
+    market_svc = getattr(rt, "market", None) if rt else None
+    return svc.get_audit_metrics(market_service=market_svc)
+
+
 @router.get("/latest")
 def latest() -> Dict[str, Any]:
     row = svc.get_latest()

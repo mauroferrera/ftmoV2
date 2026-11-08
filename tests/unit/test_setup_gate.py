@@ -260,4 +260,19 @@ class TestEvaluateGate:
         assert plan["approved"] is False
         assert any("Score 59.5 (base 64.0 + HTF -4.5) < umbral 60" in r for r in plan["reasons"])
 
+    def test_order_type_limit_en_retroceso_a_zona(self):
+        """Si el precio está extendido por encima de la zona BUY, el gate publica BUY_LIMIT."""
+        snap = _snapshot(direccion="BUY", price=1.1010)
+        # Zona FVG elegida: bottom 1.1000, top 1.1005. Precio actual: 1.1010
+        plan = setup_gate.evaluate_gate(snap, CFG)
+        assert plan["entry"] == 1.1005
+        assert plan["order_type"] == "BUY_LIMIT"
+        assert plan["is_limit_order"] is True
+
+        # Si el precio ya está mitigando/dentro de la zona (1.1002), es BUY a mercado
+        snap_inside = _snapshot(direccion="BUY", price=1.1002)
+        plan_inside = setup_gate.evaluate_gate(snap_inside, CFG)
+        assert plan_inside["order_type"] == "BUY"
+        assert plan_inside["is_limit_order"] is False
+
 

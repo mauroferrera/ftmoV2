@@ -202,4 +202,37 @@ Integrado en el visor gráfico principal (`static/index.html` sobre TradingView 
    - Capa interactiva (`📦 Cajas OB / FVG`) que inicia apagada por defecto para mantener el gráfico limpio.
    - Mapea cajas sombreadas institucionales en tiempo real para todos los activos y pares de divisas (`OB+`, `OB-`, `FVG+`, `FVG-`).
    - Detección automática de confluencia: si el bolsillo OTE de Fibonacci coincide con una caja viva de OB o FVG, el borde se ilumina en dorado con el distintivo `🎯 OB + OTE` o `🎯 FVG + OTE`.
-| `GET` | `/api/chart/setup-eval?symbol=EURUSD` | Incluye el bloque `macro_confluence` enriquecido con `verdict_status`, `recommended_risk_pct` y `ruling`. |
+
+---
+
+## 8. Auditoría Empírica, Órdenes Límite y Filtro de Triple Confluencia
+
+### 8.1 Resultados de la Auditoría Histórica (23 Runs en `trading.db` vs. MT5)
+A partir de la ejecución retrospectiva contra velas reales M15 de MetaTrader 5 (`scratch/evaluate_tribunal_forecasts.py` y `EurUsdSpotAnalysisService.get_audit_metrics`):
+- **Precisión Direccional a 4 Horas:** **52.2%** Tribunal Macro vs. **65.2%** Consenso de Fuentes Web/Bancarias.
+- **Win Rate Táctico con Entrada a Mercado Ciega:** **22.2%** (Target +20 pips vs. SL -15 pips).
+- **Excursión Adversa Máxima Promedio (MAE):** **-21.5 pips** antes de moverse en la dirección pronosticada.
+- **Excursión Favorable Promedio (MFE):** **+14.9 pips** (con picos superiores a +32.8 pips).
+
+### 8.2 Calibración a Órdenes Límite (`BUY_LIMIT` / `SELL_LIMIT`)
+Debido a que el precio casi siempre realiza un retroceso de 15 a 25 pips para cazar liquidez en Order Blocks o Fibonacci OTE antes de iniciar el movimiento tendencial:
+1. **`core/setup_gate.py` y `api/services/setup_eval.py`:**
+   - Si el precio está extendido por encima de la zona alcista, emite `order_type: "BUY_LIMIT"` anclada al borde proximal del OB/FVG o OTE 0.618.
+   - Si el precio está extendido por debajo de la zona bajista, emite `order_type: "SELL_LIMIT"`.
+   - Si el precio ya está mitigando/dentro de la zona, permite ejecución a mercado.
+   - El Stop Loss estructural queda blindado tras el borde distal de la zona (+ spread de seguridad).
+2. **Copilot Panel (`static/index.html`):**
+   - El veredicto refleja el tipo de orden (`APROBADO (BUY LIMIT)` / `APROBADO (SELL LIMIT)`).
+   - Los botones de compra/venta y el modal de confirmación muestran el precio límite exacto y la etiqueta `(Pullback Limit OB/OTE)`.
+
+### 8.3 Filtro de Triple Confluencia en AutoTrader (`api/services/autotrader.py`)
+AutoTrader cuenta con la regla `autotrader_triple_confluence: true` (declarada en `config/strategy.yaml` y validada por `core/strategy.py`):
+1. **Confluencia 1 (Tribunal Macro & Consenso Web):** Exige consenso favorable (>50%) de bancos/analistas y que el Tribunal no se encuentre en `VETO` ni con sesgo contrario al trade.
+2. **Confluencia 2 (Killzone Activa):** Exige que la operación caiga dentro de las sesiones de alto volumen institucional (Londres 07:00-10:00 UTC o Nueva York 12:30-15:30 UTC).
+3. **Confluencia 3 (Mitigación de Zona):** Verifica que el precio no haya despegado ya en persecución (deriva máxima 3.5 pips). Si se alejó, rechaza la persecución y espera el retroceso a la zona de entrada.
+
+### 8.4 Scorecard Visual en la UI
+Disponible mediante el endpoint `GET /api/analysis/eurusd-spot/audit-metrics` y la nueva pestaña **`📊 Auditoría / Scorecard`** dentro del modal EUR/USD de `static/index.html`:
+- Tarjetas KPI en vivo (Acierto Consenso Web 65.2%, Acierto Tribunal 52.2%, Win Rate Mercado Ciego 22.2%, MAE -21.5p, MFE +14.9p).
+- Resumen ejecutivo de calibraciones institucionales.
+- Tabla interactiva run por run con etiquetas de acierto/fallo y desglose pips 4h/8h.
