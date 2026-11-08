@@ -692,6 +692,7 @@
       flex: 1;
       min-height: 0;
       background: var(--bg);
+      align-items: start;
       transition: grid-template-columns 0.2s ease-in-out;
     }
 
@@ -940,6 +941,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      max-height: calc(100vh - 120px);
     }
 
     .sidebar-header {
@@ -1226,8 +1228,9 @@
 
     /* The Interactive Chart Container */
     .chart-viewport {
-      flex: 1;
-      min-height: 500px;
+      height: 480px;
+      min-height: 360px;
+      max-height: 58vh;
       position: relative;
       background: #06090e;
     }
@@ -1327,6 +1330,7 @@
       overflow-y: auto;
       overflow-x: hidden;
       min-width: 0;
+      max-height: calc(100vh - 120px);
     }
 
     .panel-header-title {
@@ -2050,6 +2054,7 @@
           <button class="btn-icon" id="btn-fib-labels" onclick="cycleFibLabelMode()" style="display:none;" title="Cambiar ubicación de los cartelitos para no tapar las velas (Fuera Derecha / Fuera Izquierda / Ocultos)">🏷️ Carteles: Fuera Der</button>
           <button class="btn-icon" id="btn-invert-fib" onclick="invertFibDrawing()" style="display:none;" title="Invertir dirección del Fibonacci (0% ↔ 100%)">⇄ Invertir</button>
           <button class="btn-icon" id="btn-clear-fib" onclick="clearFibDrawing()" style="display:none;" title="Borrar líneas de Fibonacci manual">✕ Borrar Fib</button>
+          <button class="btn-icon" id="btn-chart-height" onclick="toggleChartHeightPreset()" title="Cambiar tamaño de altura del gráfico (Normal / Compacto / Amplio)">↕ Altura</button>
           <button class="btn-icon" id="btn-reset-chart">⤢ Auto-fit</button>
           <button class="btn-icon" id="btn-refresh-data">⟳ Refrescar</button>
         </div>
@@ -5922,9 +5927,49 @@
       });
     }
 
+    // Presets y control de altura del gráfico
+    const CHART_HEIGHT_PRESETS = [
+      { name: 'Normal', height: '480px' },
+      { name: 'Compacto', height: '400px' },
+      { name: 'Amplio', height: '580px' },
+    ];
+    let currentHeightPresetIdx = 0;
+
+    function initChartHeightPreset() {
+      const saved = localStorage.getItem('ftmo_chart_height_preset');
+      if (saved) {
+        const found = CHART_HEIGHT_PRESETS.findIndex(p => p.name.toLowerCase() === saved.toLowerCase());
+        if (found >= 0) currentHeightPresetIdx = found;
+      }
+      applyChartHeightPreset(currentHeightPresetIdx, false);
+    }
+
+    function toggleChartHeightPreset() {
+      currentHeightPresetIdx = (currentHeightPresetIdx + 1) % CHART_HEIGHT_PRESETS.length;
+      applyChartHeightPreset(currentHeightPresetIdx, true);
+    }
+
+    function applyChartHeightPreset(idx, save) {
+      const p = CHART_HEIGHT_PRESETS[idx];
+      const vp = $('chart-viewport-container');
+      const btn = $('btn-chart-height');
+      if (vp && p) {
+        vp.style.height = p.height;
+        vp.style.maxHeight = 'none';
+      }
+      if (btn && p) {
+        btn.textContent = `↕ ${p.name}`;
+      }
+      if (save && p) {
+        localStorage.setItem('ftmo_chart_height_preset', p.name);
+      }
+      requestCanvasRedraw();
+    }
+
     // Inicialización al arrancar
     window.addEventListener('DOMContentLoaded', async () => {
       initChart();
+      initChartHeightPreset();
       setupEvents();
 
       if (localStorage.getItem('ftmo_sidebar_collapsed') === 'true') {
