@@ -692,7 +692,6 @@
       flex: 1;
       min-height: 0;
       background: var(--bg);
-      align-items: start;
       transition: grid-template-columns 0.2s ease-in-out;
     }
 
@@ -941,7 +940,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      max-height: calc(100vh - 120px);
+      height: 100%;
     }
 
     .sidebar-header {
@@ -1228,9 +1227,8 @@
 
     /* The Interactive Chart Container */
     .chart-viewport {
-      height: 480px;
-      min-height: 360px;
-      max-height: 58vh;
+      height: 500px;
+      min-height: 380px;
       position: relative;
       background: #06090e;
     }
@@ -1330,7 +1328,7 @@
       overflow-y: auto;
       overflow-x: hidden;
       min-width: 0;
-      max-height: calc(100vh - 120px);
+      height: 100%;
     }
 
     .panel-header-title {
@@ -5929,9 +5927,9 @@
 
     // Presets y control de altura del gráfico
     const CHART_HEIGHT_PRESETS = [
-      { name: 'Normal', height: '480px' },
-      { name: 'Compacto', height: '400px' },
-      { name: 'Amplio', height: '580px' },
+      { name: 'Normal', height: '500px' },
+      { name: 'Compacto', height: '420px' },
+      { name: 'Amplio', height: '600px' },
     ];
     let currentHeightPresetIdx = 0;
 
