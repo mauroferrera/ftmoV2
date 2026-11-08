@@ -2086,6 +2086,10 @@
           <div class="smc-dot" style="background:#38bdf8;"></div>
           <span>📋 Órdenes Límite</span>
         </button>
+        <button type="button" class="smc-tag-pill off" id="layer-btn-smc_boxes" onclick="toggleChartLayer('smc_boxes')" title="El Fibonacci no se opera solo; se busca confluencia. La mejor entrada ocurre cuando la zona 0.618 – 0.705 coincide exactamente con una caja de Order Block (OB) o FVG en la misma zona horaria (Londres o NY Killzone).">
+          <div class="smc-dot" style="background:#a855f7;"></div>
+          <span>Cajas OB / FVG</span>
+        </button>
         <button type="button" class="smc-tag-pill off" id="layer-btn-bull_smc" onclick="toggleChartLayer('bull_smc')" title="Mostrar / ocultar FVG+ y Order Blocks alcistas (OB+)">
           <div class="smc-dot" style="background:#00e599;"></div>
           <span>Bullish FVG/OB</span>
@@ -2718,6 +2722,7 @@
       chartLayers: {
         plan: false,
         orders: true,
+        smc_boxes: false,
         bull_smc: false,
         bear_smc: false,
         pd_levels: false,
@@ -3689,7 +3694,38 @@
 
       ctx.save();
 
-      // Cajas opacas retiradas a petición del usuario: se grafican solo líneas limpias de Fibonacci sin bloquear las velas.
+      // 1. Sombreado del Bolsillo OTE / Golden Pocket (0.618 a 0.786)
+      const y618 = yForRatio(0.618);
+      const y786 = yForRatio(0.786);
+      if (y618 != null && y786 != null) {
+        const topOte = Math.min(y618, y786);
+        const hOte = Math.abs(y786 - y618);
+        const grad = ctx.createLinearGradient(xLeft, topOte, xRight, topOte + hOte);
+        grad.addColorStop(0, 'rgba(245, 158, 11, 0.11)');
+        grad.addColorStop(0.5, 'rgba(168, 85, 247, 0.13)');
+        grad.addColorStop(1, 'rgba(244, 63, 94, 0.09)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(xLeft, topOte, xRight - xLeft, hOte);
+      }
+
+      // 2. Sombreado sutil entre Equilibrium (0.50) y 0.618
+      const y50 = yForRatio(0.500);
+      if (y50 != null && y618 != null) {
+        const topEq = Math.min(y50, y618);
+        const hEq = Math.abs(y618 - y50);
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.04)';
+        ctx.fillRect(xLeft, topEq, xRight - xLeft, hEq);
+      }
+
+      // 3. Sombreado sutil de zona de Expansión / Take Profit (0.0 a -0.272)
+      const y0 = yForRatio(0.0);
+      const yTp1 = yForRatio(-0.272);
+      if (y0 != null && yTp1 != null) {
+        const topTp = Math.min(y0, yTp1);
+        const hTp = Math.abs(yTp1 - y0);
+        ctx.fillStyle = 'rgba(0, 229, 153, 0.045)';
+        ctx.fillRect(xLeft, topTp, xRight - xLeft, hTp);
+      }
 
       // 4. Línea de tendencia diagonal punteada (Origen 100% -> Extremo 0%) y nodos de anclaje interactivos
       const y1 = state.candleSeries.priceToCoordinate(p1);
@@ -3966,9 +4002,176 @@
       return { fvgs, order_blocks: obs };
     }
 
-    // Dibujo de Cajas SMC (Order Blocks y FVGs) retirado a petición del usuario para mantener el gráfico 100% limpio y despejado
+    // Dibuja las Cajas Sombreadas de Order Blocks (OB) y Fair Value Gaps (FVG) en el Canvas
+    // Detecta y resalta automáticamente la confluencia con el OTE de Fibonacci (0.618 a 0.786)
     function drawSmcBoxesOnCanvas(ctx, paneW, paneH) {
-      return null;
+      const layers = state.chartLayers || {};
+      if (layers.smc_boxes === false) return null;
+
+      const candles = state.cachedCandles || [];
+      if (candles.length < 5) return null;
+
+      const ts = state.chartInstance.timeScale();
+      const sym = state.symbol;
+
+      const analysisPatterns = (state.lastAnalysis && state.lastAnalysis.patterns) || {};
+      const backendFvgs = analysisPatterns.fvgs || [];
+      const backendObs = analysisPatterns.order_blocks || [];
+      const localZones = detectLocalSmcZones(candles);
+
+      const allZones = [];
+      const seenKeys = new Set();
+
+      function addZone(z) {
+        if (!z || z.top == null || z.bottom == null || Number(z.top) <= Number(z.bottom)) return;
+        const key = `${z.type}_${Math.round(Number(z.top) * 100000)}_${Math.round(Number(z.bottom) * 100000)}`;
+        if (seenKeys.has(key)) return;
+        seenKeys.add(key);
+        allZones.push(z);
+      }
+
+      backendObs.forEach(ob => addZone(ob));
+      backendFvgs.forEach(fg => addZone(fg));
+      localZones.order_blocks.forEach(ob => addZone(ob));
+      localZones.fvgs.forEach(fg => addZone(fg));
+
+      if (!allZones.length) return null;
+
+      // Calcular OTE del Fibonacci activo (Auto o Manual) si está presente
+      let oteMin = null, oteMax = null;
+      if (state.currentFibPoints && state.currentFibPoints.p1 != null && state.currentFibPoints.p2 != null) {
+        const p1 = Number(state.currentFibPoints.p1);
+        const p2 = Number(state.currentFibPoints.p2);
+        const diff = p2 - p1;
+        const r618 = p2 - diff * 0.618;
+        const r786 = p2 - diff * 0.786;
+        oteMin = Math.min(r618, r786);
+        oteMax = Math.max(r618, r786);
+      }
+
+      let detectedConfluence = null;
+      const recentZones = allZones.slice(-8);
+
+      ctx.save();
+
+      for (const z of recentZones) {
+        const isBull = (z.type || '').includes('BULLISH');
+        const isOB = (z.type || '').includes('OB');
+
+        const yTop = state.candleSeries.priceToCoordinate(Number(z.top));
+        const yBottom = state.candleSeries.priceToCoordinate(Number(z.bottom));
+        if (yTop == null || yBottom == null) continue;
+
+        const yBoxTop = Math.min(yTop, yBottom);
+        const yBoxH = Math.max(4, Math.abs(yBottom - yTop));
+        if (yBoxTop + yBoxH < 0 || yBoxTop > paneH) continue;
+
+        let xStart = null;
+        if (z.start_time != null && ts.timeToCoordinate) {
+          xStart = ts.timeToCoordinate(z.start_time);
+        }
+        if (xStart == null && z.start_idx != null) {
+          xStart = ts.logicalToCoordinate(z.start_idx);
+        }
+        if (xStart == null) {
+          const cIdx = candles.findIndex(c => c.time === z.start_time);
+          if (cIdx >= 0) xStart = ts.logicalToCoordinate(cIdx);
+        }
+        if (xStart == null) xStart = 40;
+
+        const clampedX = Math.max(6, Math.min(paneW - 40, xStart));
+        const boxW = Math.max(30, (paneW - 4) - clampedX);
+
+        // Regla Pro: Confluencia exacta cuando OTE (0.618 - 0.705 - 0.786) coincide con OB o FVG
+        const hasConfluence = (oteMin != null && oteMax != null &&
+          Math.max(Number(z.bottom), oteMin) <= Math.min(Number(z.top), oteMax));
+
+        if (hasConfluence && !detectedConfluence) {
+          detectedConfluence = {
+            desc: `${isOB ? 'OB' : 'FVG'} ${isBull ? 'Alcista' : 'Bajista'} en OTE [${formatPrice(z.bottom, sym)} – ${formatPrice(z.top, sym)}]`,
+          };
+        }
+
+        let fillGrad = ctx.createLinearGradient(clampedX, yBoxTop, clampedX + boxW, yBoxTop);
+        let borderCol, labelCol, tagTxt;
+
+        if (hasConfluence) {
+          fillGrad.addColorStop(0, isBull ? 'rgba(0, 229, 153, 0.28)' : 'rgba(255, 59, 105, 0.28)');
+          fillGrad.addColorStop(0.4, 'rgba(245, 158, 11, 0.22)');
+          fillGrad.addColorStop(1, 'rgba(168, 85, 247, 0.12)');
+          borderCol = '#f59e0b';
+          labelCol = '#f59e0b';
+          tagTxt = `${isOB ? 'OB' : 'FVG'} + OTE`;
+        } else if (isOB) {
+          if (isBull) {
+            fillGrad.addColorStop(0, 'rgba(0, 229, 153, 0.16)');
+            fillGrad.addColorStop(1, 'rgba(0, 229, 153, 0.03)');
+            borderCol = 'rgba(0, 229, 153, 0.55)';
+            labelCol = '#00e599';
+            tagTxt = 'OB+';
+          } else {
+            fillGrad.addColorStop(0, 'rgba(255, 59, 105, 0.16)');
+            fillGrad.addColorStop(1, 'rgba(255, 59, 105, 0.03)');
+            borderCol = 'rgba(255, 59, 105, 0.55)';
+            labelCol = '#ff3b69';
+            tagTxt = 'OB-';
+          }
+        } else {
+          if (isBull) {
+            fillGrad.addColorStop(0, 'rgba(16, 185, 129, 0.14)');
+            fillGrad.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
+            borderCol = 'rgba(16, 185, 129, 0.45)';
+            labelCol = '#10b981';
+            tagTxt = 'FVG+';
+          } else {
+            fillGrad.addColorStop(0, 'rgba(244, 63, 94, 0.14)');
+            fillGrad.addColorStop(1, 'rgba(244, 63, 94, 0.02)');
+            borderCol = 'rgba(244, 63, 94, 0.45)';
+            labelCol = '#f43f5e';
+            tagTxt = 'FVG-';
+          }
+        }
+
+        // 1. Fondo de la caja
+        ctx.fillStyle = fillGrad;
+        ctx.fillRect(clampedX, yBoxTop, boxW, yBoxH);
+
+        // 2. Borde de la caja
+        ctx.strokeStyle = borderCol;
+        ctx.lineWidth = hasConfluence ? 1.5 : (isOB ? 1.1 : 0.9);
+        ctx.setLineDash(isOB ? [] : [4, 3]);
+        ctx.strokeRect(clampedX, yBoxTop, boxW, yBoxH);
+
+        // 3. Etiqueta identificadora en el extremo derecho (margen libre)
+        ctx.setLineDash([]);
+        ctx.font = hasConfluence ? "bold 9.5px 'JetBrains Mono', monospace" : "600 9px 'JetBrains Mono', monospace";
+        const tw = ctx.measureText(tagTxt).width;
+        const pillW = tw + 10;
+        const pillH = 14;
+        const pillX = Math.max(clampedX + 6, (paneW - 6) - pillW);
+        const pillY = Math.max(2, Math.min(paneH - pillH - 2, yBoxTop + yBoxH * 0.5 - pillH * 0.5));
+
+        ctx.fillStyle = hasConfluence ? 'rgba(26, 20, 12, 0.92)' : 'rgba(7, 10, 16, 0.88)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(pillX, pillY, pillW, pillH, 3);
+        } else {
+          ctx.rect(pillX, pillY, pillW, pillH);
+        }
+        ctx.fill();
+
+        ctx.strokeStyle = borderCol;
+        ctx.lineWidth = 0.85;
+        ctx.stroke();
+
+        ctx.fillStyle = labelCol;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(tagTxt, pillX + pillW * 0.5, pillY + pillH * 0.5 + 0.5);
+      }
+
+      ctx.restore();
+      return detectedConfluence;
     }
 
     // Renderizador maestro del Canvas superpuesto (HiDPI / Retina)
