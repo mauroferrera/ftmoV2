@@ -1317,6 +1317,18 @@ class ExecutionService:
             salidas = [f for f in salidas if str(f.get("symbol") or "").strip().upper() == sym_clean]
         return salidas, None
 
+    @_con_cuenta
+    def cancel_order(self, ticket: int) -> Tuple[Dict[str, Any], int]:
+        """Elimina una orden pendiente en MT5."""
+        if self._execution is None:
+            return {"error": "Sin puerto de ejecución"}, 503
+        fn = getattr(self._execution, "cancel_order", None)
+        if not callable(fn):
+            return {"error": "cancel_order no soportado en este adaptador"}, 501
+        res = fn(ticket)
+        status = 200 if res.get("ok") else 400
+        return res, status
+
 
 def _float_or_none(value: Any) -> Optional[float]:
     """`float(value)` o `None` si no es un número utilizable (incluido 0.0 → 0.0)."""

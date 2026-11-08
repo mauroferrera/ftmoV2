@@ -221,6 +221,22 @@ def get_orders(
     return {"orders": list(filas or [])}
 
 
+@router.post("/api/orders/{ticket}/cancel", response_model=None)
+@router.delete("/api/orders/{ticket}", response_model=None)
+def cancel_order(
+    ticket: int,
+    rt: Any = Depends(deps.runtime),
+    _auth: None = Depends(deps.require_api_token),
+    account: Optional[str] = Query(
+        None, description="login MT5 de la cuenta (varias cuentas)"),
+) -> Dict[str, Any]:
+    """Cancela o elimina una orden pendiente en MT5 por su ticket."""
+    cuerpo, status = _servicio(rt, account).cancel_order(ticket=ticket)
+    if status >= 400:
+        raise HTTPException(status_code=status, detail=cuerpo)
+    return cuerpo
+
+
 @router.post("/api/positions/{ticket}/close", response_model=None)
 def post_close_position(
     ticket: int,

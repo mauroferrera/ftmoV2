@@ -915,6 +915,30 @@ class MT5ExecutionAdapter:
         except TerminalUnavailable:
             return []
 
+    def cancel_order(self, ticket: int) -> Dict[str, Any]:
+        """Elimina una orden pendiente vía TRADE_ACTION_REMOVE."""
+        int_ticket = int(ticket)
+
+        def _cancel(mt5) -> Dict[str, Any]:
+            req = {
+                "action": getattr(mt5, "TRADE_ACTION_REMOVE", 8),
+                "order": int_ticket,
+            }
+            res = mt5.order_send(req)
+            retcode = int(getattr(res, "retcode", 0) or 0) if res else None
+            ok = retcode in RETCODE_OK
+            return {
+                "ok": ok,
+                "ticket": int_ticket,
+                "retcode": retcode,
+                "comment": getattr(res, "comment", None) if res else "Sin respuesta de MT5",
+            }
+
+        try:
+            return self._session.call(_cancel, account=self._account_id)
+        except TerminalUnavailable as exc:
+            return {"ok": False, "ticket": int_ticket, "error": str(exc)}
+
 
 def adapter(session: Optional[Session] = None, account_id: Optional[str] = None) -> MT5ExecutionAdapter:
     """Fábrica. Igual que en el adaptador de lectura: permite inyectar la sesión
