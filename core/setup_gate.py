@@ -298,11 +298,6 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     )
 
     direction, mejor = max(lados, key=lambda par: float((par[1] or {}).get("score") or 0.0))
-    base_score = float((mejor or {}).get("score") or 0.0)
-    components = (mejor or {}).get("components") or {}
-    killzone = components.get("killzone") or {}
-    in_killzone = bool(killzone.get("in_killzone"))
-    killzone_name = killzone.get("name")
 
     if min_score is not None and _num(min_score) is not None:
         umbral = float(_num(min_score))
@@ -313,9 +308,78 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     price = _num(snapshot.get("current_price"))
     analysis = snapshot.get("analysis") or {}
     patterns = (analysis.get("patterns")) or {}
+    htf_ctx = analysis.get("htf_context")
+
+    sl_dist, sl_origin = strategy.sl_distance_for(cfg, symbol or None, spec)
+    tp_ratio = strategy.tp_ratio_for(cfg)
+    span_limit = max_zone_span(cfg, sl_dist)
+    digits = _spec_attr(spec, "digits", 6)
+    point = _spec_attr(spec, "point", 0.00001)
+
+    # Regla 1 (Premium vs. Discount): Comprar barato en el Piso (Discount <= 50%)
+    # y Vender caro en el Techo (Premium > 50%). Prohibido vender en el piso o comprar en el techo.
+    pdh = _num(snapshot.get("pdh"))
+    pdl = _num(snapshot.get("pdl"))
+    if pdh is None and isinstance(htf_ctx, dict):
+        pdh = _num(htf_ctx.get("pdh"))
+    if pdl is None and isinstance(htf_ctx, dict):
+        pdl = _num(htf_ctx.get("pdl"))
+
+    range_pos_pct: Optional[float] = None
+    dealing_zone: Optional[str] = None
+    location_bonus = 0.0
+    location_blocked = False
+    location_reason: Optional[str] = None
+
+    if pdh is not None and pdl is not None and pdh > pdl and price is not None:
+        eq_50 = (pdh + pdl) / 2.0
+        range_pos_pct = ((price - pdl) / (pdh - pdl)) * 100.0
+        dealing_zone = "DISCOUNT" if price <= eq_50 else "PREMIUM"
+
+        if dealing_zone == "DISCOUNT":
+            # En Discount (Piso) está prohibido vender; priorizamos compras si hay zona alcista
+            if direction == "SELL" and re_.get("bull"):
+                z_buy = entry_zone(patterns, price, "BUY", span_limit)
+                if z_buy.get("zone") is not None:
+                    direction = "BUY"
+                    mejor = re_.get("bull")
+                    scores_empatados = False
+            if direction == "BUY":
+                if range_pos_pct <= 35.0:
+                    location_bonus = 10.0
+            else:
+                location_blocked = True
+                location_reason = (
+                    f"Precio en Zona Barata / Discount ({range_pos_pct:.0f}% del rango diario, "
+                    f"piso PDL {_fmt(pdl, digits)}): prohibido vender en el piso; "
+                    "esperando compras o rebote a zona cara (Premium)."
+                )
+        else:
+            # En Premium (Techo) está prohibido comprar; priorizamos ventas si hay zona bajista
+            if direction == "BUY" and re_.get("bear"):
+                z_sell = entry_zone(patterns, price, "SELL", span_limit)
+                if z_sell.get("zone") is not None:
+                    direction = "SELL"
+                    mejor = re_.get("bear")
+                    scores_empatados = False
+            if direction == "SELL":
+                if range_pos_pct >= 65.0:
+                    location_bonus = 10.0
+            else:
+                location_blocked = True
+                location_reason = (
+                    f"Precio en Zona Cara / Premium ({range_pos_pct:.0f}% del rango diario, "
+                    f"techo PDH {_fmt(pdh, digits)}): prohibido comprar en el techo; "
+                    "esperando ventas o caída a zona barata (Discount)."
+                )
+
+    base_score = float((mejor or {}).get("score") or 0.0)
+    components = (mejor or {}).get("components") or {}
+    killzone = components.get("killzone") or {}
+    in_killzone = bool(killzone.get("in_killzone"))
+    killzone_name = killzone.get("name")
 
     # Unificación de confluencia HTF dentro del gate de aprobación (P1 - Audit #4)
-    htf_ctx = analysis.get("htf_context")
     htf_bonus = 0.0
     htf_conf = None
     if isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
@@ -328,12 +392,8 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
             htf_conf = None
             htf_bonus = 0.0
 
-    score_effective = round(min(100.0, max(0.0, base_score + htf_bonus)), 1)
+    score_effective = round(min(100.0, max(0.0, base_score + htf_bonus + location_bonus)), 1)
     verdict = risk_engine.grade_score(score_effective)
-
-    sl_dist, sl_origin = strategy.sl_distance_for(cfg, symbol or None, spec)
-    tp_ratio = strategy.tp_ratio_for(cfg)
-    span_limit = max_zone_span(cfg, sl_dist)
 
     zone = entry_zone(patterns, price, direction, span_limit)
     elegida = zone.get("zone")
@@ -350,9 +410,6 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     order_type = determine_order_type(direction, price, entry, has_zone=(elegida is not None))
     is_limit_order = order_type in ("BUY_LIMIT", "SELL_LIMIT")
     zone_too_far = zone.get("reason") == ZONE_TOO_FAR
-
-    digits = _spec_attr(spec, "digits", 6)
-    point = _spec_attr(spec, "point", 0.00001)
 
     atr_val = _num(analysis.get("atr_14")) or _num(snapshot.get("atr_14")) or 0.0
     spread_val = _num(snapshot.get("spread_price")) or 0.0
@@ -411,10 +468,13 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         and sl is not None
         and not zone_too_far
         and not scores_empatados
+        and not location_blocked
         and validation.get("approved")
     )
 
     reasons: List[str] = []
+    if location_blocked and location_reason:
+        reasons.append(location_reason)
     if score_effective < umbral:
         if htf_bonus != 0.0:
             reasons.append(
@@ -444,6 +504,9 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         "score": score_effective,
         "base_score": base_score,
         "htf_score_bonus": htf_bonus,
+        "location_score_bonus": location_bonus,
+        "dealing_zone": dealing_zone,
+        "range_position_pct": round(range_pos_pct, 1) if range_pos_pct is not None else None,
         "htf_confluence": htf_conf,
         "verdict": verdict,
         "min_score_used": umbral,

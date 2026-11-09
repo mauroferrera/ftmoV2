@@ -296,6 +296,7 @@ class AutoTraderService:
             return managed_list
 
         # Filtramos posiciones operadas por el bot (o todas las de la cuenta)
+        market_svc = getattr(self._rt, "market", None) if self._rt is not None else None
         for p in pos_data:
             ticket = p.get("ticket")
             if not ticket:
@@ -303,20 +304,71 @@ class AutoTraderService:
 
             # Consultamos la vista de gestión
             try:
-                view = exec_svc.management_view(ticket)
+                raw_view = exec_svc.management_view(ticket)
+                view = raw_view[0] if isinstance(raw_view, tuple) else raw_view
             except Exception as exc:
                 log.debug("Sin vista de gestión para #%s: %s", ticket, exc)
                 continue
 
-            if not view or not view.get("can_apply"):
+            if not isinstance(view, dict):
                 continue
 
-            # Califica para gestión (ej. superó 2R y no ha tomado parcial o movido a BE)
-            log.info("Posición #%s (%s %s) lista para gestión a %.1fR. Aplicando...",
-                     ticket, view.get("symbol"), view.get("direction"), view.get("r_actual") or 0.0)
+            can_apply = bool(view.get("can_apply"))
+            force_be = False
+            exhaustion_reason: Optional[str] = None
+
+            # Regla 3 (Salida Inteligente por Agotamiento de Volumen o Equilibrio 50%):
+            # Si la posición va en ganancia pero aún no toca 1R/2R, revisamos si llegó al 50%
+            # del rango diario (Equilibrium) o si el volumen de TradingView se secó / giró en contra.
+            if not can_apply and not view.get("be_applied") and view.get("r_original"):
+                r_act = float(view.get("r_actual") or 0.0)
+                profit_usd = float(p.get("profit") or 0.0)
+                sym_pos = str(view.get("symbol") or p.get("symbol") or "").upper()
+                dir_pos = str(view.get("direction") or "").upper()
+                cur_p = float(p.get("price_current") or 0.0)
+
+                if r_act >= 0.35 or profit_usd >= 25.0:
+                    # A) Revisar llegada al 50% Equilibrium del rango diario (PDH/PDL)
+                    if market_svc is not None and cur_p > 0:
+                        try:
+                            pat_d = market_svc.pattern_data(sym_pos, "M15", 60)
+                            if isinstance(pat_d, dict):
+                                pdh_v = pat_d.get("pdh")
+                                pdl_v = pat_d.get("pdl")
+                                if pdh_v and pdl_v and float(pdh_v) > float(pdl_v):
+                                    eq_50 = (float(pdh_v) + float(pdl_v)) / 2.0
+                                    if (dir_pos == "BUY" and cur_p >= eq_50) or (dir_pos == "SELL" and cur_p <= eq_50):
+                                        force_be = True
+                                        exhaustion_reason = f"precio alcanzó Equilibrio 50% diario ({eq_50:.5f})"
+                        except Exception:
+                            pass
+
+                    # B) Revisar agotamiento de volumen o absorción contraria en TradingView
+                    if not force_be and sym_pos:
+                        try:
+                            from adapters.tradingview.tv_adapter import CME_FUTURES_MAP, TradingViewAdapter
+                            if sym_pos in CME_FUTURES_MAP:
+                                ic = TradingViewAdapter().evaluate_confluence(sym_pos, dir_pos, timeframe="M15")
+                                ic_st = str((ic or {}).get("status") or "")
+                                if ic_st in ("BAJO_VOLUMEN_CME", "BAJO_VOLUMEN_SPOT", "ALERTA_CONTRA_BALLENAS"):
+                                    force_be = True
+                                    exhaustion_reason = f"agotamiento/giro de volumen en TradingView ({ic_st})"
+                        except Exception:
+                            pass
+
+            if not can_apply and not force_be:
+                continue
+
+            if force_be:
+                log.info("Posición #%s (%s %s) con ganancia (+%.2fR): protegiendo en Break-Even por %s...",
+                         ticket, view.get("symbol"), view.get("direction"),
+                         view.get("r_actual") or 0.0, exhaustion_reason)
+            else:
+                log.info("Posición #%s (%s %s) lista para gestión a %.1fR. Aplicando...",
+                         ticket, view.get("symbol"), view.get("direction"), view.get("r_actual") or 0.0)
 
             try:
-                res, code = exec_svc.apply_management(ticket, force=False)
+                res, code = exec_svc.apply_management(ticket, force=force_be)
                 if code == 200:
                     managed_list.append({
                         "ticket": ticket,
@@ -324,6 +376,7 @@ class AutoTraderService:
                         "r_actual": view.get("r_actual"),
                         "partial_volume": res.get("partial_volume"),
                         "be_level": res.get("be_level"),
+                        "reason": exhaustion_reason or "target_r_reached",
                     })
                     log.info("Gestión exitosa en #%s: parcial=%s, BE=%s",
                              ticket, res.get("partial_volume"), res.get("be_level"))
@@ -342,12 +395,17 @@ class AutoTraderService:
         current_price: Optional[float],
         momento: datetime,
         killzone_info: Optional[Any] = None,
+        pdh: Optional[float] = None,
+        pdl: Optional[float] = None,
+        inst_confluence: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, Optional[str]]:
-        """Aplica el Filtro de Triple Confluencia institucional:
+        """Aplica el Filtro de Confluencia Institucional + Estrategia del Usuario:
         
-        1. Consenso Web / Bancario favorable y Tribunal Macro EUR/USD alineado (sin VETO).
-        2. Ventana de Killzone activa (Londres 07:00-10:00 UTC o NY 12:30-15:30 UTC).
-        3. Mitigación / Toque de la zona (OB/FVG/OTE): no perseguir velas lejanas.
+        1. Ventana de Killzone activa (Londres 07:00-10:00 UTC o NY 12:30-15:30 UTC).
+        2. Regla 1 (Premium vs. Discount): Comprar barato en Discount (<=50%) y Vender caro en Premium (>50%).
+        3. Regla 2 y 4 (Volumen VSA TradingView + Brújula Dólar DXY): Fuerza de volumen / absorción y sin SMT opuesto.
+        4. Consenso Web / Bancario favorable y Tribunal Macro EUR/USD alineado (sin VETO).
+        5. Mitigación / Toque de la zona (OB/FVG/OTE): no perseguir velas lejanas.
         """
         # 1. Ventana de Killzone
         in_kz = False
@@ -364,8 +422,54 @@ class AutoTraderService:
         if not in_kz:
             return False, "Fuera de Killzone (requiere Londres 07-10 UTC o NY 12:30-15:30 UTC)"
 
-        # 2. Tribunal Macro y Consenso Web / Bancos (EURUSD)
         sym_clean = str(symbol or "").upper().replace("/", "")
+
+        # 2. Regla 1: Ubicación Premium vs. Discount (Comprar en el piso / Vender en el techo)
+        if (pdh is None or pdl is None) and self._rt is not None:
+            market_svc = getattr(self._rt, "market", None)
+            if market_svc is not None and hasattr(market_svc, "pattern_data"):
+                try:
+                    p_data = market_svc.pattern_data(sym_clean, "M15", 60)
+                    if isinstance(p_data, dict):
+                        pdh = p_data.get("pdh")
+                        pdl = p_data.get("pdl")
+                except Exception:
+                    pass
+
+        if pdh is not None and pdl is not None and float(pdh) > float(pdl) and current_price is not None:
+            pdh_f, pdl_f, cp_f = float(pdh), float(pdl), float(current_price)
+            eq_50 = (pdh_f + pdl_f) / 2.0
+            pos_pct = ((cp_f - pdl_f) / (pdh_f - pdl_f)) * 100.0
+            if direction == "SELL" and cp_f <= eq_50:
+                return False, f"Precio en Zona Barata / Discount ({pos_pct:.0f}% del rango diario): prohibido vender en el piso"
+            if direction == "BUY" and cp_f > eq_50:
+                return False, f"Precio en Zona Cara / Premium ({pos_pct:.0f}% del rango diario): prohibido comprar en el techo"
+
+        # 3. Regla 2 (Volumen VSA TradingView) + Regla 4 (Brújula Dólar DXY)
+        if inst_confluence is None and self._rt is not None:
+            try:
+                from adapters.tradingview.tv_adapter import CME_FUTURES_MAP, TradingViewAdapter
+                if sym_clean in CME_FUTURES_MAP:
+                    inst_confluence = TradingViewAdapter().evaluate_confluence(sym_clean, direction, timeframe="M15")
+            except Exception:
+                inst_confluence = None
+
+        if isinstance(inst_confluence, dict):
+            ic_status = str(inst_confluence.get("status") or "")
+            ic_ratio = inst_confluence.get("vol_ratio")
+            ic_abs = inst_confluence.get("absorption")
+            smt_status = str(inst_confluence.get("smt_status") or "")
+            if ic_status in ("BAJO_VOLUMEN_CME", "BAJO_VOLUMEN_SPOT"):
+                return False, f"Volumen débil en TradingView ({ic_ratio}x): esperando pico de volumen o absorción"
+            if ic_status == "ALERTA_CONTRA_BALLENAS":
+                return False, f"Absorción institucional en contra ({ic_abs}) en TradingView"
+            if (
+                (direction == "BUY" and smt_status == "BEARISH_SMT")
+                or (direction == "SELL" and smt_status == "BULLISH_SMT")
+            ) and ic_status != "ALTA_CONFLUENCIA_BALLENAS":
+                return False, f"Brújula Dólar (DXY) en contra ({smt_status})"
+
+        # 4. Tribunal Macro y Consenso Web / Bancos (EURUSD)
         if sym_clean == "EURUSD":
             try:
                 import json

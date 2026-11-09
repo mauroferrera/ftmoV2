@@ -231,4 +231,49 @@ def test_autotrader_triple_confluence_filter():
     assert ok_pass is True
     assert reason_pass is None
 
+    # 4. Prohibido vender en Zona Discount (Piso) -> Rechazado
+    ok_disc, reason_disc = svc._check_triple_confluence(
+        symbol="EURUSD",
+        direction="SELL",
+        planned_entry=1.1148,
+        current_price=1.1147,
+        momento=dentro_kz,
+        killzone_info={"in_killzone": True},
+        pdh=1.1220,
+        pdl=1.1135,
+    )
+    assert ok_disc is False
+    assert "Discount" in reason_disc
+
+    # 5. Volumen débil en TradingView (BAJO_VOLUMEN_CME) -> Rechazado
+    ok_vol, reason_vol = svc._check_triple_confluence(
+        symbol="EURUSD",
+        direction="BUY",
+        planned_entry=1.1140,
+        current_price=1.1141,
+        momento=dentro_kz,
+        killzone_info={"in_killzone": True},
+        pdh=1.1220,
+        pdl=1.1135,
+        inst_confluence={"status": "BAJO_VOLUMEN_CME", "vol_ratio": 0.12, "smt_status": "ALINEADO"},
+    )
+    assert ok_vol is False
+    assert "Volumen débil" in reason_vol
+
+    # 6. Brújula Dólar (DXY) en contra (BEARISH_SMT contra BUY) -> Rechazado
+    ok_dxy, reason_dxy = svc._check_triple_confluence(
+        symbol="EURUSD",
+        direction="BUY",
+        planned_entry=1.1140,
+        current_price=1.1141,
+        momento=dentro_kz,
+        killzone_info={"in_killzone": True},
+        pdh=1.1220,
+        pdl=1.1135,
+        inst_confluence={"status": "VOLUMEN_ESTANDAR", "vol_ratio": 1.15, "smt_status": "BEARISH_SMT"},
+    )
+    assert ok_dxy is False
+    assert "DXY" in reason_dxy
+
+
 

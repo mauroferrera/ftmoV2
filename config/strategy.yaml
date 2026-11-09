@@ -50,7 +50,7 @@ execution:
   # En USDCAD/AUDCAD (1 pip ≈ $4.40 a 0.60 lotes), 68 pips = $300 USD (0.0068)
   # En USDJPY/EURJPY/AUDJPY (1 pip ≈ $3.87 a 0.60 lotes), 77.5 pips = $300 USD (0.775)
   # En AUDNZD (1 pip ≈ $3.60 a 0.60 lotes), 83 pips = $300 USD (0.0083)
-  # Oro (XAUUSD): Excluido de symbols_allow por volatilidad extrema a 0.60 lotes.
+  # Oro (XAUUSD): Excluido de symbols_allow para AutoTrader (solo manual con micro-lote 0.05 y SL de $20 = $100 USD).
   sl_distance: 0.0050
   sl_distance_by_symbol:
     EURUSD: 0.0050
@@ -64,7 +64,7 @@ execution:
     AUDNZD: 0.0083
     AUDCHF: 0.0050
     AUDJPY: 0.775
-    XAUUSD: 8.0
+    XAUUSD: 20.0
   # Objetivo en múltiplos de R. 2.0 = por cada $1 arriesgado, $2 de objetivo.
   tp_ratio_r: 2.0
   # Piso de volatilidad del stop, en múltiplos de ATR(14). Un stop DENTRO de una

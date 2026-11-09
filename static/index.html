@@ -5463,7 +5463,7 @@
       if (!slInput || isNaN(slInput)) {
         // Distancia por defecto = la de config (sl_distance_by_symbol).
         const slDist = (state.slBySymbol && state.slBySymbol[sym])
-          || (sym === 'XAUUSD' ? 8.0 : 0.0015);
+          || (sym === 'XAUUSD' ? 20.0 : 0.0050);
         let pipVal = 10;
         let contract = 100000;
         if (sym === 'XAUUSD') {
@@ -5475,8 +5475,10 @@
         } else if (sym.endsWith('JPY')) {
           pipVal = 6.67;
         }
-        const calcLot = (riskUsd / (slDist * contract * (pipVal / 10))).toFixed(2);
-        $('trade-lot').value = Math.max(0.01, Math.min(10, calcLot));
+        const rawCalc = riskUsd / (slDist * contract * (pipVal / 10));
+        const maxCap = sym === 'XAUUSD' ? 0.05 : 10;
+        const calcLot = Math.max(0.01, Math.min(maxCap, rawCalc)).toFixed(2);
+        $('trade-lot').value = calcLot;
         alert(`Lote calculado: ${calcLot} para arriesgar máx ${fmtUsd(riskUsd)} con SL sugerido a ${slDist} del precio.\n(O puedes dejar el lote vacío para que el servidor lo calcule exactamente por bróker).`);
         return;
       }
@@ -5506,7 +5508,8 @@
         lot = (riskUsd / (pips * 7.5)).toFixed(2);
       }
 
-      lot = Math.max(0.01, Math.min(20, lot));
+      const maxLotCap = sym === 'XAUUSD' ? 0.05 : 20;
+      lot = Math.max(0.01, Math.min(maxLotCap, Number(lot))).toFixed(2);
       $('trade-lot').value = lot;
       alert(`Lote dimensionado automáticamente a ${lot} lotes para un riesgo de ${fmtUsd(riskUsd)}.\n(Nota: si dejas el campo vacío, el backend dimensionará exactamente por bróker).`);
     }
@@ -5514,7 +5517,7 @@
     // Limpia SL/TP (y opcionalmente el lote) al cambiar de contexto, para no
     // arrastrar niveles de otro símbolo/timeframe.
     function resetTradeInputs(resetLot) {
-      if (resetLot) $('trade-lot').value = '0.10';
+      if (resetLot) $('trade-lot').value = (state.symbol === 'XAUUSD') ? '0.05' : '0.10';
       $('trade-sl').value = '';
       $('trade-tp').value = '';
       state.setupKey = null;
@@ -5593,7 +5596,7 @@
         timeframe: state.timeframe,
       };
 
-      $('modal-force').checked = !!($('trade-force') && $('trade-force').checked);
+      $('modal-force').checked = (symbol === 'XAUUSD') || !!($('trade-force') && $('trade-force').checked);
       $('modal-force-wrap').style.display = 'flex';
 
       // La réplica solo tiene sentido con más de una cuenta mapeada. Con una, la

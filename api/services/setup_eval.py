@@ -175,6 +175,9 @@ def evaluate(snapshot: Dict[str, Any],
     if "base_score" in gate:
         ret["base_score"] = gate["base_score"]
         ret["htf_score_bonus"] = gate.get("htf_score_bonus", 0.0)
+        ret["location_score_bonus"] = gate.get("location_score_bonus", 0.0)
+        ret["dealing_zone"] = gate.get("dealing_zone")
+        ret["range_position_pct"] = gate.get("range_position_pct")
         ret["score_with_htf"] = gate["score"]
         ret["htf_confluence"] = gate.get("htf_confluence")
     else:
@@ -227,18 +230,61 @@ def evaluate(snapshot: Dict[str, Any],
 
     # Confluencia institucional de volumen de Futuros CME y DXY (TradingView)
     sym_clean = str(gate.get("symbol") or "").upper().replace("/", "")
-    if direction in ("BUY", "SELL"):
+    inst_conf = snap.get("institutional_confluence")
+    has_live_ctx = (
+        snap.get("pdh") is not None
+        or snap.get("pdl") is not None
+        or (snap.get("analysis") or {}).get("htf_context") is not None
+    )
+    if inst_conf is None and direction in ("BUY", "SELL") and has_live_ctx:
         try:
             from adapters.tradingview.tv_adapter import CME_FUTURES_MAP, TradingViewAdapter
 
             if sym_clean in CME_FUTURES_MAP:
                 tv = TradingViewAdapter()
                 tf_used = str(snap.get("timeframe") or "M15")
-                ret["institutional_confluence"] = tv.evaluate_confluence(
+                inst_conf = tv.evaluate_confluence(
                     sym_clean, direction, timeframe=tf_used
                 )
         except Exception:
-            pass
+            inst_conf = None
+
+    if isinstance(inst_conf, dict):
+        ret["institutional_confluence"] = inst_conf
+        ic_status = str(inst_conf.get("status") or "")
+        ic_ratio = inst_conf.get("vol_ratio")
+        ic_abs = inst_conf.get("absorption")
+        smt_status = str(inst_conf.get("smt_status") or "")
+
+        # Regla 2 (Volumen VSA TradingView) + Regla 4 (Brújula Dólar DXY)
+        if ic_status in ("BAJO_VOLUMEN_CME", "BAJO_VOLUMEN_SPOT"):
+            ret["approved"] = False
+            ret["verdict"] = "ESPERANDO_VOLUMEN"
+            ret["reasons"] = [
+                f"Volumen débil en TradingView ({ic_ratio}x): tu estrategia exige fuerza de volumen o absorción para entrar.",
+                *ret["reasons"],
+            ]
+        elif ic_status == "ALERTA_CONTRA_BALLENAS":
+            ret["approved"] = False
+            ret["verdict"] = "CONTRA_BALLENAS"
+            ret["reasons"] = [
+                f"Absorción institucional en contra ({ic_abs}): las ballenas están absorbiendo en sentido opuesto.",
+                *ret["reasons"],
+            ]
+        elif (
+            (direction == "BUY" and smt_status == "BEARISH_SMT")
+            or (direction == "SELL" and smt_status == "BULLISH_SMT")
+        ) and ic_status != "ALTA_CONFLUENCIA_BALLENAS":
+            ret["approved"] = False
+            ret["verdict"] = "CONTRA_DXY"
+            ret["reasons"] = [
+                f"Brújula Dólar (DXY) en contra ({smt_status}): divergencia SMT opuesta a {direction}.",
+                *ret["reasons"],
+            ]
+
+        if not ret["approved"]:
+            ret["echarts"] = {"markLine": [], "markPoint": []}
+            ret["view"] = None
 
     return ret
 

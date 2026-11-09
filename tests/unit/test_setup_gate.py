@@ -275,4 +275,34 @@ class TestEvaluateGate:
         assert plan_inside["order_type"] == "BUY"
         assert plan_inside["is_limit_order"] is False
 
+    def test_premium_discount_bloquea_venta_en_piso_y_compra_en_techo(self):
+        """Regla 1: Prohibido vender en Discount (piso) y prohibido comprar en Premium (techo)."""
+        # 1. Intento de SELL en el piso (pdl=1.1000, pdh=1.1100, price=1.1010 -> 10% Discount)
+        snap_sell_floor = _snapshot(direccion="SELL", price=1.1010)
+        snap_sell_floor["pdh"] = 1.1100
+        snap_sell_floor["pdl"] = 1.1000
+        plan_floor = setup_gate.evaluate_gate(snap_sell_floor, CFG)
+        assert plan_floor["dealing_zone"] == "DISCOUNT"
+        assert plan_floor["approved"] is False
+        assert any("prohibido vender en el piso" in r for r in plan_floor["reasons"])
+
+        # 2. Intento de BUY en el techo (pdl=1.0900, pdh=1.1020, price=1.1010 -> 92% Premium)
+        snap_buy_ceil = _snapshot(direccion="BUY", price=1.1010)
+        snap_buy_ceil["pdh"] = 1.1020
+        snap_buy_ceil["pdl"] = 1.0900
+        plan_ceil = setup_gate.evaluate_gate(snap_buy_ceil, CFG)
+        assert plan_ceil["dealing_zone"] == "PREMIUM"
+        assert plan_ceil["approved"] is False
+        assert any("prohibido comprar en el techo" in r for r in plan_ceil["reasons"])
+
+        # 3. BUY en el piso (Discount 10%) -> Aprobado y recibe bonus de ubicación (+10 pts)
+        snap_buy_floor = _snapshot(direccion="BUY", price=1.1010)
+        snap_buy_floor["pdh"] = 1.1100
+        snap_buy_floor["pdl"] = 1.1000
+        plan_buy_ok = setup_gate.evaluate_gate(snap_buy_floor, CFG)
+        assert plan_buy_ok["dealing_zone"] == "DISCOUNT"
+        assert plan_buy_ok["location_score_bonus"] == 10.0
+        assert plan_buy_ok["approved"] is True
+
+
 

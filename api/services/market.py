@@ -407,6 +407,8 @@ class MarketService:
             "symbol": s,
             "timeframe": tf,
             "current_price": precio,
+            "pdh": datos.get("pdh"),
+            "pdl": datos.get("pdl"),
             "last_time": last_time,
             "analysis": datos.get("analysis") or {},
             # El spread en precio (no en puntos): es lo que necesita el buffer
