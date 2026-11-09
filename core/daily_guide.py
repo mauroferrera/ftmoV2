@@ -19,10 +19,10 @@ def compute_daily_guide(
     pwh: Optional[float] = None,
     pwl: Optional[float] = None,
     calendar_events: Optional[List[Dict[str, Any]]] = None,
-    account_balance: float = 2000.0,
-    daily_loss_budget: float = 100.0,
+    account_balance: float = 25000.0,
+    daily_loss_budget: float = 300.0,
 ) -> Dict[str, Any]:
-    """Genera la Guía Operativa Diaria en lenguaje claro y estructurado."""
+    """Genera la Guía Operativa Diaria alineada a la estrategia Premium/Discount + VSA."""
     cp = round(float(current_price), 5)
     _pdh = round(float(pdh), 5) if pdh is not None else round(cp + 0.0040, 5)
     _pdl = round(float(pdl), 5) if pdl is not None else round(cp - 0.0040, 5)
@@ -49,41 +49,41 @@ def compute_daily_guide(
     pos_pct = round(((cp - _pdl) / range_total) * 100, 1) if range_total > 0 else 50.0
     pos_pct = max(0.0, min(100.0, pos_pct))
 
-    # 2. Diagnóstico de Ubicación y Plan de Acción
-    if cp >= (_pdh - 0.0008):  # A menos de 8 pips del techo o por encima
+    # 2. Diagnóstico de Ubicación (Premium >= 75% o <= 8 pips de PDH | Discount <= 25% o <= 8 pips de PDL)
+    if cp >= (_pdh - 0.0008) or pos_pct >= 75.0:
         zone = "TECHO_VENTA"
-        zone_label = "🔴 En Zona de Techo (Cerca del PDH)"
+        zone_label = f"🔴 Zona Premium / Techo ({pos_pct:.0f}% del rango)"
         action_bias = "VENTA_FAVORECIDA"
-        headline = "Oportunidad de VENTA hacia el Medio de Camino"
-        pips_to_tp = round((cp - equilibrium_50) * 10000, 1)
+        headline = "Precio Caro (Premium): Buscar VENTA con Absorción de Volumen"
+        pips_to_tp = round(max(5.0, (cp - equilibrium_50) * 10000), 1)
         action_plan = (
-            f"El precio ({cp:.5f}) está en el extremo superior ({dist_pdh_pips:.1f} pips de PDH {_pdh:.5f}). "
-            f"Estrategia recomendada: buscar VENTA esperando confirmación de rechazo o mecha de barrido (Sweep). "
-            f"Take Profit sugerido al medio del camino en {equilibrium_50:.5f} (+{pips_to_tp:.1f} pips). "
-            f"Stop Loss protegido a 15 pips sobre el máximo reciente."
+            f"El precio ({cp:.5f}) está en Zona Premium ({pos_pct:.0f}% del rango diario, a {dist_pdh_pips:.1f} pips de PDH {_pdh:.5f}). "
+            f"Estrategia recomendada: buscar VENTA (o SELL LIMIT en el techo) cuando veas crecer las velas de volumen frenando la subida (Absorción Vendedora). "
+            f"Take Profit hacia el equilibrio 50% en {equilibrium_50:.5f} (+{pips_to_tp:.1f} pips) o cerrar al agotarse la fuerza del volumen. "
+            f"Stop de Emergencia protegido a 50 pips ($300 USD)."
         )
-    elif cp <= (_pdl + 0.0008):  # A menos de 8 pips del piso o por debajo
+    elif cp <= (_pdl + 0.0008) or pos_pct <= 25.0:
         zone = "PISO_COMPRA"
-        zone_label = "🟢 En Zona de Piso (Cerca del PDL)"
+        zone_label = f"🟢 Zona Discount / Piso ({pos_pct:.0f}% del rango)"
         action_bias = "COMPRA_FAVORECIDA"
-        headline = "Oportunidad de COMPRA hacia el Medio de Camino"
-        pips_to_tp = round((equilibrium_50 - cp) * 10000, 1)
+        headline = "Precio Barato (Discount): Buscar COMPRA con Absorción de Volumen"
+        pips_to_tp = round(max(5.0, (equilibrium_50 - cp) * 10000), 1)
         action_plan = (
-            f"El precio ({cp:.5f}) está en el extremo inferior ({dist_pdl_pips:.1f} pips de PDL {_pdl:.5f}). "
-            f"Estrategia recomendada: buscar COMPRA esperando confirmación de rechazo o mecha de barrido (Sweep). "
-            f"Take Profit sugerido al medio del camino en {equilibrium_50:.5f} (+{pips_to_tp:.1f} pips). "
-            f"Stop Loss protegido a 15 pips bajo el mínimo reciente."
+            f"El precio ({cp:.5f}) está en Zona Discount ({pos_pct:.0f}% del rango diario, a {dist_pdl_pips:.1f} pips de PDL {_pdl:.5f}). "
+            f"Estrategia recomendada: buscar COMPRA (o BUY LIMIT en el piso) cuando crezca el volumen a la inversa frenando la caída (Absorción Compradora). "
+            f"Take Profit hacia el equilibrio 50% en {equilibrium_50:.5f} (+{pips_to_tp:.1f} pips) o cerrar cuando el impulso pierda fuerza. "
+            f"Stop de Emergencia protegido a 50 pips ($300 USD)."
         )
     else:
         zone = "CENTRO_NEUTRO"
-        zone_label = "⏸️ En Mitad de Camino (Zona Neutra)"
+        zone_label = f"⏸️ Mitad de Camino ({pos_pct:.0f}% · Zona Neutra)"
         action_bias = "ESPERAR_EXTREMOS"
-        headline = "Paciencia: Precio en Zona Muerta (No entrar aquí)"
+        headline = "Paciencia (Efecto Jardinero): Precio en Mitad del Rango"
         action_plan = (
-            f"El precio ({cp:.5f}) cotiza en el centro del rango ({pos_pct:.0f}% entre PDL y PDH). "
-            f"No abras operaciones ahora porque estás en medio del recorrido y el retroceso te tomaría en contra. "
-            f"Espera pacientemente a que el precio suba al Techo ({_pdh:.5f}) para vender, "
-            f"o baje al Piso ({_pdl:.5f}) para comprar hacia el medio de camino ({equilibrium_50:.5f})."
+            f"El precio ({cp:.5f}) cotiza en el centro del rango ({pos_pct:.0f}% entre PDL {_pdl:.5f} y PDH {_pdh:.5f}). "
+            f"No abras operaciones ahora a mercado porque no estás ni barato (Discount) ni caro (Premium). "
+            f"Deja trabajando una orden límite o espera a que el precio suba al Techo ({_pdh:.5f}) para vender caro, "
+            f"o baje al Piso ({_pdl:.5f}) para comprar barato con absorción de volumen."
         )
 
     # 3. Semáforo Macro y Calendario
@@ -104,28 +104,33 @@ def compute_daily_guide(
     if high_impact_events:
         traffic_light = "PRECAUCION"
         traffic_icon = "🟡"
-        traffic_msg = f"Precaución: {len(high_impact_events)} evento(s) de alto impacto hoy. Evitar operar cerca de: {', '.join(danger_hours[:2])}."
+        traffic_msg = f"Precaución: {len(high_impact_events)} evento(s) de alto impacto hoy. Evitar entrar justo antes de: {', '.join(danger_hours[:2])}."
     else:
         traffic_light = "LUZ_VERDE"
         traffic_icon = "🟢"
-        traffic_msg = "Luz Verde: Sin noticias de alto impacto inminentes en EUR ni USD. El mercado tiende a respetar los rebotes en PDH/PDL hacia el 50%."
+        traffic_msg = "Luz Verde: Sin noticias explosivas inminentes en EUR ni USD. Condiciones ideales para operar giros por absorción en Piso (Discount) y Techo (Premium)."
 
-    # 4. Calculadora Rápida para Cuenta Propia ($2,000 / Tope $100)
-    # Sugerir 2 operaciones de $45 c/u para no gastar los $100
-    target_risk_usd = 45.0
-    typical_sl_pips = 18.0
-    suggested_lot = round(target_risk_usd / (typical_sl_pips * 10.0), 2)  # $10 por pip en 1 lote estándar
-    expected_gain_usd = round(suggested_lot * (range_pips * 0.45) * 10.0, 1)
+    # 4. Parámetros de Gestión de Riesgo de la Estrategia
+    if account_balance == 2000.0 and daily_loss_budget == 100.0:
+        target_risk_usd = 45.0
+        typical_sl_pips = 18.0
+        suggested_lot = round(target_risk_usd / (typical_sl_pips * 10.0), 2)
+        expected_gain_usd = round(suggested_lot * (range_pips * 0.45) * 10.0, 1)
+    else:
+        target_risk_usd = float(daily_loss_budget)  # Stop de Emergencia $300 USD
+        typical_sl_pips = 50.0  # 50 pips en EUR/USD (0.0050) = $300 USD a 0.60 lotes
+        suggested_lot = round(target_risk_usd / (typical_sl_pips * 10.0), 2)  # 0.60 lotes (tope) o 0.10-0.60
+        expected_gain_usd = round(max(37.7, min(120.0, (range_pips * 0.45) * 2.5)), 1)
 
     risk_calculator = {
         "account_balance": account_balance,
         "daily_loss_budget": daily_loss_budget,
-        "max_trades_recommended": 2,
+        "max_trades_recommended": 3,
         "risk_per_trade_usd": target_risk_usd,
         "suggested_sl_pips": typical_sl_pips,
         "suggested_lot": max(0.01, suggested_lot),
         "expected_win_usd": max(10.0, expected_gain_usd),
-        "circuit_breaker_note": f"Si hoy acumulas -${daily_loss_budget:.0f} en pérdidas, apaga la pantalla y no operes más hasta mañana.",
+        "circuit_breaker_note": f"Stop de Emergencia calibrado en ${target_risk_usd:.0f} USD ({typical_sl_pips:.0f} pips en EUR/USD) para dar aire al trade con seguro contra cisnes negros.",
     }
 
     return {

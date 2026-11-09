@@ -2421,33 +2421,33 @@
             </div>
           </div>
 
-          <!-- Calculadora Rápida Cuenta Propia ($2,000 / $100 Tope) -->
+          <!-- Reglas de la Estrategia (FTMO $25k · Stop Emergencia $300 · VSA) -->
           <div class="eurusd-section">
             <div class="eurusd-section-header">
-              <span class="eurusd-section-title">💰 Gestión para Cuenta Propia ($2,000 · Tope $100/Día)</span>
-              <span class="eurusd-badge warn">Máx 2 Trades</span>
+              <span class="eurusd-section-title">🛡️ Reglas de Tu Estrategia (Premium/Discount + Absorción VSA · FTMO $25k)</span>
+              <span class="eurusd-badge bull">XAUUSD Excluido · Forex Líquido</span>
             </div>
             <div class="eurusd-section-body" id="guide-risk-body">
               <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.6rem;">
                 <div class="bank-card">
-                  <div style="color:var(--text-muted); font-size:0.72rem;">RIESGO POR TRADE</div>
-                  <div style="font-size:1.05rem; font-weight:700; color:var(--warn);">$45 USD</div>
-                  <div style="font-size:0.7rem; color:var(--text-dim);">2 balas máx para el tope de $100</div>
+                  <div style="color:var(--text-muted); font-size:0.72rem;">STOP DE EMERGENCIA</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--warn);" id="guide-calc-risk">$300 USD</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Seguro contra cisnes negros</div>
                 </div>
                 <div class="bank-card">
-                  <div style="color:var(--text-muted); font-size:0.72rem;">SL TÉCNICO SUGERIDO</div>
-                  <div style="font-size:1.05rem; font-weight:700; color:var(--text-main);" id="guide-calc-sl">18 pips</div>
-                  <div style="font-size:0.7rem; color:var(--text-dim);">Detrás del PDH o PDL</div>
+                  <div style="color:var(--text-muted); font-size:0.72rem;">HOLGURA DEL STOP (SL)</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--text-main);" id="guide-calc-sl">50 pips</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Aire para que el trade respire (0.0050)</div>
                 </div>
                 <div class="bank-card">
-                  <div style="color:var(--text-muted); font-size:0.72rem;">LOTAJE EXACTO MT5</div>
-                  <div style="font-size:1.05rem; font-weight:700; color:var(--accent, #38bdf8);" id="guide-calc-lot">0.25 lotes</div>
-                  <div style="font-size:0.7rem; color:var(--text-dim);">Respeta estrictamente los $45</div>
+                  <div style="color:var(--text-muted); font-size:0.72rem;">LOTAJE Y GATILLO</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--accent, #38bdf8);" id="guide-calc-lot">0.10 – 0.60 lotes</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Piso/Techo + Pico de Volumen (VSA)</div>
                 </div>
                 <div class="bank-card">
-                  <div style="color:var(--text-muted); font-size:0.72rem;">GANANCIA ESPERADA (50%)</div>
-                  <div style="font-size:1.05rem; font-weight:700; color:var(--bull);" id="guide-calc-win">+$80 a +$95 USD</div>
-                  <div style="font-size:0.7rem; color:var(--text-dim);">Al llegar al medio de camino</div>
+                  <div style="color:var(--text-muted); font-size:0.72rem;">SALIDA / OBJETIVO</div>
+                  <div style="font-size:1.05rem; font-weight:700; color:var(--bull);" id="guide-calc-win">Agotamiento / 50%</div>
+                  <div style="font-size:0.7rem; color:var(--text-dim);">Al secarse el volumen o tocar 50% Eq.</div>
                 </div>
               </div>
             </div>
@@ -6198,12 +6198,14 @@
       const gActionPlan = document.getElementById('guide-action-plan');
       if (gActionPlan) gActionPlan.textContent = diag.action_plan || '—';
 
+      const gCalcRisk = document.getElementById('guide-calc-risk');
+      if (gCalcRisk) gCalcRisk.textContent = `$${risk.risk_per_trade_usd ?? 300} USD`;
       const gCalcSl = document.getElementById('guide-calc-sl');
-      if (gCalcSl) gCalcSl.textContent = `${risk.suggested_sl_pips ?? 18} pips`;
+      if (gCalcSl) gCalcSl.textContent = `${risk.suggested_sl_pips ?? 50} pips`;
       const gCalcLot = document.getElementById('guide-calc-lot');
-      if (gCalcLot) gCalcLot.textContent = `${risk.suggested_lot ?? 0.25} lotes`;
+      if (gCalcLot) gCalcLot.textContent = `0.10 – ${Number(risk.suggested_lot ?? 0.60).toFixed(2)} lotes`;
       const gCalcWin = document.getElementById('guide-calc-win');
-      if (gCalcWin) gCalcWin.textContent = `+$${risk.expected_win_usd ?? 85} USD`;
+      if (gCalcWin) gCalcWin.textContent = `Agotamiento / +$${risk.expected_win_usd ?? 65} USD`;
 
       const metaDb = data._meta_db || data.meta || {};
       const metaEl = document.getElementById('eurusd-modal-meta');

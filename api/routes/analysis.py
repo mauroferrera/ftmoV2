@@ -16,18 +16,18 @@ svc = EurUsdSpotAnalysisService()
 
 
 def _ensure_daily_guide(payload: Dict[str, Any]) -> None:
-    if not payload.get("daily_guide"):
-        p_val = (payload.get("price") or {}).get("current") or 1.1238
-        tech_data = payload.get("technical") or {}
-        smc_data = tech_data.get("smc_summary") or {}
-        pdh_val = smc_data.get("pdh")
-        pdl_val = smc_data.get("pdl")
-        payload["daily_guide"] = compute_daily_guide(
-            current_price=p_val,
-            pdh=pdh_val,
-            pdl=pdl_val,
-            calendar_events=payload.get("calendar_today"),
-        )
+    p_val = (payload.get("price") or {}).get("current") or 1.1238
+    tech_data = payload.get("technical") or {}
+    smc_data = tech_data.get("smc_summary") or {}
+    existing_lvls = ((payload.get("daily_guide") or {}).get("levels") or {})
+    pdh_val = smc_data.get("pdh") or existing_lvls.get("pdh_ceiling")
+    pdl_val = smc_data.get("pdl") or existing_lvls.get("pdl_floor")
+    payload["daily_guide"] = compute_daily_guide(
+        current_price=p_val,
+        pdh=pdh_val,
+        pdl=pdl_val,
+        calendar_events=payload.get("calendar_today"),
+    )
 
 
 @router.get("/daily-guide")
