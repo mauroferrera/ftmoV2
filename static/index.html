@@ -5163,20 +5163,19 @@
       const { ok, data } = await getJSON(withAccount('/api/orders'));
       if (!ok || !data || !Array.isArray(data.orders)) {
         state.pendingOrders = [];
-        const badge = $('orders-count-badge');
-        if (badge) badge.style.display = 'none';
-        return;
+      } else {
+        state.pendingOrders = data.orders;
       }
-      state.pendingOrders = data.orders;
       const badge = $('orders-count-badge');
       if (badge) {
-        if (data.orders.length > 0) {
+        if (state.pendingOrders.length > 0) {
           badge.style.display = 'inline-block';
-          badge.textContent = `${data.orders.length} límite pend.`;
+          badge.textContent = `${state.pendingOrders.length} límite pend.`;
         } else {
           badge.style.display = 'none';
         }
       }
+      renderPositionsAndOrdersTable();
       if (state.chartLayers && state.chartLayers.orders !== false) {
         renderChartOverlays();
       }
@@ -5185,26 +5184,36 @@
     // Cargar Posiciones Abiertas
     async function loadPositions() {
       const { ok, data } = await getJSON(withAccount('/api/positions'));
-      const tbody = $('pos-table-body');
-
-      if (!ok || !data || !data.positions || !data.positions.length) {
+      if (!ok || !data || !data.positions || !Array.isArray(data.positions)) {
         state.openPositions = [];
-        renderChartOverlays();
-        tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No hay posiciones abiertas en este momento.</td></tr>';
-        $('pos-count-badge').textContent = '0';
-        $('pos-floating-total').textContent = 'PnL Flotante: $0.00';
-        loadOrders();
-        return;
+      } else {
+        state.openPositions = data.positions;
       }
+      renderPositionsAndOrdersTable();
+      await loadOrders();
+    }
 
-      state.openPositions = data.positions;
-      renderChartOverlays();
-      loadOrders();
-      $('pos-count-badge').textContent = data.positions.length;
+    function renderPositionsAndOrdersTable() {
+      const tbody = $('pos-table-body');
+      if (!tbody) return;
+
+      const positions = state.openPositions || [];
+      const orders = state.pendingOrders || [];
+
+      $('pos-count-badge').textContent = positions.length;
+
       let totalPnl = 0;
       tbody.innerHTML = '';
 
-      data.positions.forEach(pos => {
+      if (positions.length === 0 && orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No hay posiciones abiertas ni órdenes límite pendientes en este momento.</td></tr>';
+        $('pos-floating-total').textContent = 'PnL Flotante: $0.00';
+        $('pos-floating-total').style.color = 'var(--text-dim)';
+        return;
+      }
+
+      // 1. Renderizar Posiciones Abiertas de Mercado
+      positions.forEach(pos => {
         const profit = Number(pos.profit || 0);
         totalPnl += profit;
         const isBull = profit >= 0;
@@ -5240,7 +5249,42 @@
       $('pos-floating-total').textContent = `PnL Flotante: ${fmtUsd(totalPnl)}`;
       $('pos-floating-total').style.color = totalPnl >= 0 ? 'var(--bull)' : 'var(--bear)';
 
-      // Eventos de botones cerrar y gestión
+      // 2. Renderizar Órdenes Límite / Pendientes (con botón para cancelar)
+      orders.forEach(ord => {
+        const typeStr = String(ord.type || 'BUY_LIMIT').toUpperCase();
+        const isBuy = typeStr.includes('BUY');
+        const typeCls = isBuy ? 'bull' : 'bear';
+
+        const tr = document.createElement('tr');
+        tr.style.background = 'rgba(56, 189, 248, 0.05)';
+        tr.style.borderLeft = '3px solid var(--accent, #38bdf8)';
+        tr.innerHTML = `
+          <td>#${ord.ticket}</td>
+          <td>
+            <button type="button" class="pos-sym-btn" onclick="selectSymbol('${ord.symbol}')" title="Ver gráfico de ${ord.symbol}">
+              <b>${ord.symbol}</b> <span style="font-size:0.75rem; opacity:0.8;">↗</span>
+            </button>
+          </td>
+          <td><span style="color:var(--${typeCls}); font-weight:700;">⏳ ${typeStr}</span></td>
+          <td>${ord.volume}</td>
+          <td><b>${ord.price_open}</b> <span style="font-size:0.7rem; color:var(--accent, #38bdf8); font-weight:600;">(Límite)</span></td>
+          <td>${ord.price_current || '—'}</td>
+          <td style="color:var(--bear);">${ord.sl || '—'}</td>
+          <td style="color:var(--bull);">${ord.tp || '—'}</td>
+          <td style="color:var(--text-dim); font-size:0.75rem;">En Espera</td>
+          <td>
+            <span class="mgmt-badge pending" style="background:rgba(56, 189, 248, 0.12); color:#38bdf8; border:1px solid rgba(56, 189, 248, 0.3);">Pendiente</span>
+          </td>
+          <td>
+            <button class="btn-cancel-order" data-ticket="${ord.ticket}" style="background:rgba(239, 68, 68, 0.18); color:#ef4444; border:1px solid #ef4444; padding:0.25rem 0.65rem; border-radius:4px; font-weight:700; cursor:pointer; font-size:0.74rem;" title="Cancelar y retirar orden límite de MT5">
+              ❌ Cancelar Límite
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Eventos de botones cerrar y gestión de posiciones
       tbody.querySelectorAll('.btn-close-pos').forEach(btn => {
         btn.onclick = (e) => {
           const ticket = e.target.getAttribute('data-ticket');
@@ -5251,6 +5295,14 @@
         btn.onclick = (e) => {
           const ticket = e.target.getAttribute('data-ticket');
           confirmManagementPosition(ticket);
+        };
+      });
+
+      // Eventos de botones cancelar orden límite
+      tbody.querySelectorAll('.btn-cancel-order').forEach(btn => {
+        btn.onclick = (e) => {
+          const ticket = e.target.getAttribute('data-ticket');
+          confirmCancelOrder(ticket);
         };
       });
     }
@@ -5350,6 +5402,23 @@
         loadPropState();
       } else {
         alert(`Error al cerrar posición: ${(data && data.detail) || 'Error desconocido'}`);
+      }
+    }
+
+    // Cancelar orden pendiente / límite
+    async function confirmCancelOrder(ticket) {
+      if (!confirm(`¿Confirmas cancelar y retirar la orden límite #${ticket} de MT5?`)) return;
+      const { ok, data } = await getJSON(withAccount(`/api/orders/${ticket}/cancel`), { method: 'POST' });
+      if (ok) {
+        alert(`Orden límite #${ticket} cancelada y retirada exitosamente.`);
+        await loadOrders();
+        await loadPositions();
+        if (state.chartLayers && state.chartLayers.orders !== false) {
+          renderChartOverlays();
+        }
+      } else {
+        const errDetail = (data && (data.detail || data.error)) || 'Error desconocido al cancelar la orden.';
+        alert(`Error al cancelar orden: ${typeof errDetail === 'object' ? JSON.stringify(errDetail) : errDetail}`);
       }
     }
 
@@ -6263,10 +6332,13 @@
         }
         if (vigList) {
           const ops = vig.open_positions || [];
-          if (!ops.length) {
-            vigList.innerHTML = '<div style="font-size:0.78rem; color:var(--text-dim);">Sin operaciones abiertas actualmente. Vigilante en espera del precio en zonas del plan.</div>';
+          const pOrds = state.pendingOrders || [];
+          if (!ops.length && !pOrds.length) {
+            vigList.innerHTML = '<div style="font-size:0.78rem; color:var(--text-dim);">Sin operaciones abiertas ni órdenes límite en espera actualmente.</div>';
           } else {
-            vigList.innerHTML = ops.map(p => {
+            let htmlList = '';
+            // Posiciones abiertas de mercado
+            htmlList += ops.map(p => {
               const profitClass = (p.profit || 0) >= 0 ? 'color:var(--bull);' : 'color:var(--bear);';
               const beBadge = p.be_applied ? '<span class="eurusd-badge bull" style="font-size:0.68rem;">🛡️ Break-Even Blindado</span>' : '';
               const rBadge = p.r_actual ? `<span class="eurusd-badge" style="font-size:0.68rem;">R: +${Number(p.r_actual).toFixed(2)}R</span>` : '';
@@ -6285,6 +6357,26 @@
                 </div>
               `;
             }).join('');
+            // Órdenes límite pendientes en espera (con botón de cancelar)
+            htmlList += pOrds.map(o => {
+              const typeStr = String(o.type || 'BUY_LIMIT').toUpperCase();
+              const isBuy = typeStr.includes('BUY');
+              return `
+                <div style="background:rgba(56,189,248,0.05); border:1px solid rgba(56,189,248,0.25); border-radius:5px; padding:0.4rem 0.6rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <strong style="color:var(--text-main); font-size:0.82rem;">#${o.ticket} ${o.symbol}</strong>
+                    <span style="font-size:0.75rem; color:${isBuy?'var(--bull)':'var(--bear)'}; font-weight:700; margin-left:0.3rem;">⏳ ${typeStr}</span>
+                    <span style="font-size:0.72rem; color:var(--accent, #38bdf8); margin-left:0.3rem;">${o.volume} lotes @ ${o.price_open} (Límite)</span>
+                  </div>
+                  <div>
+                    <button type="button" class="btn btn-secondary" onclick="confirmCancelOrder(${o.ticket})" style="background:rgba(239,68,68,0.18); color:#ef4444; border:1px solid #ef4444; padding:0.25rem 0.6rem; font-size:0.72rem; font-weight:700; border-radius:4px; cursor:pointer;" title="Eliminar orden límite de MT5">
+                      ❌ Cancelar Límite
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('');
+            vigList.innerHTML = htmlList;
           }
         }
 
