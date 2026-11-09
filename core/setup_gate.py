@@ -147,34 +147,62 @@ def determine_order_type(direction: str,
     return dir_clean
 
 
+def _overlaps_ote(z: Dict[str, Any], ote_box: Optional[Dict[str, Any]]) -> bool:
+    """True si la caja `[bottom, top]` se solapa con el bolsillo Fibonacci OTE `[bottom, top]`."""
+    if not isinstance(ote_box, dict):
+        return False
+    ote_b, ote_t = _num(ote_box.get("bottom")), _num(ote_box.get("top"))
+    if ote_b is None or ote_t is None:
+        return False
+    lo, hi = min(ote_b, ote_t), max(ote_b, ote_t)
+    return float(z["bottom"]) <= hi + SPAN_EPS and float(z["top"]) >= lo - SPAN_EPS
+
+
 def entry_zone(patterns: Optional[Dict[str, Any]],
                price: Optional[float],
                direction: str,
-               max_span: Optional[float] = None) -> Dict[str, Any]:
-    """Elige la zona (FVG/OB) más cercana donde entrar y explica si no hay.
+               max_span: Optional[float] = None,
+               fib_ote: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Elige la zona (FVG/OB) donde entrar y explica si no hay.
 
     - BUY  -> la zona que queda POR DEBAJO del precio (rebote alcista).
     - SELL -> la zona que queda POR ENCIMA (rechazo bajista).
+    - Selector Inteligente Fibonacci OTE (0.618 - 0.786): si `fib_ote` está presente
+      y existen varias cajas alcanzables dentro de `max_span`, prioriza la caja que
+      coincide con el Golden Pocket OTE (evitando entrar prematuramente en una caja
+      superficial en 0.236).
 
-    Devuelve `{"zone": dict|None, "reason": str, "span": float|None}`. La zona trae
-    `bottom`, `top`, `kind` y `price` (el borde de entrada: `bottom` en BUY, `top` en
-    SELL). `span` es la distancia entre el precio y ese borde; `None` si no hay zona
-    (o si el precio/zona no son números).
+    Devuelve `{"zone": dict|None, "reason": str, "span": float|None, "in_ote": bool}`.
     """
     pat = patterns or {}
     p = _num(price)
     zonas = _zonas(pat)
     if p is None or not zonas:
-        return {"zone": None, "reason": ZONE_NO_AXIS, "span": None}
+        return {"zone": None, "reason": ZONE_NO_AXIS, "span": None, "in_ote": False}
 
     limit = ENTRY_ZONE_MAX_SPAN if max_span is None else float(max_span)
     buscando_buy = str(direction or "").strip().upper() != "SELL"
+    ote_box = (fib_ote or {}).get("buy_ote" if buscando_buy else "sell_ote") if isinstance(fib_ote, dict) else None
+
     if buscando_buy:
         candidatas = [
             z for z in zonas
             if "BULLISH" in z["kind"] and z["bottom"] <= p
         ]
-        elegida = max(candidatas, key=lambda z: z["top"]) if candidatas else None
+        alcanzables = [
+            z for z in candidatas
+            if (0.0 if p <= z["top"] else p - z["top"]) <= limit + SPAN_EPS
+        ]
+        en_ote = [z for z in alcanzables if _overlaps_ote(z, ote_box)] if ote_box else []
+        if en_ote:
+            opt = _num((ote_box or {}).get("optimal"))
+            elegida = min(
+                en_ote,
+                key=lambda z: abs(((z["top"] + z["bottom"]) / 2.0) - opt) if opt is not None else -z["top"]
+            )
+        else:
+            elegida = max(candidatas, key=lambda z: z["top"]) if candidatas else None
+
         if elegida is not None:
             borde = elegida["top"]
             if p <= elegida["top"]:
@@ -188,7 +216,20 @@ def entry_zone(patterns: Optional[Dict[str, Any]],
             z for z in zonas
             if "BEARISH" in z["kind"] and z["top"] >= p
         ]
-        elegida = min(candidatas, key=lambda z: z["bottom"]) if candidatas else None
+        alcanzables = [
+            z for z in candidatas
+            if (0.0 if p >= z["bottom"] else z["bottom"] - p) <= limit + SPAN_EPS
+        ]
+        en_ote = [z for z in alcanzables if _overlaps_ote(z, ote_box)] if ote_box else []
+        if en_ote:
+            opt = _num((ote_box or {}).get("optimal"))
+            elegida = min(
+                en_ote,
+                key=lambda z: abs(((z["top"] + z["bottom"]) / 2.0) - opt) if opt is not None else z["bottom"]
+            )
+        else:
+            elegida = min(candidatas, key=lambda z: z["bottom"]) if candidatas else None
+
         if elegida is not None:
             borde = elegida["bottom"]
             if p >= elegida["bottom"]:
@@ -199,16 +240,26 @@ def entry_zone(patterns: Optional[Dict[str, Any]],
                 entry_price = borde
 
     if elegida is None:
-        return {"zone": None, "reason": ZONE_NO_AXIS, "span": None}
+        return {"zone": None, "reason": ZONE_NO_AXIS, "span": None, "in_ote": False}
 
     if span > limit + SPAN_EPS:
-        return {"zone": None, "reason": ZONE_TOO_FAR, "span": span}
+        return {"zone": None, "reason": ZONE_TOO_FAR, "span": span, "in_ote": False}
+
+    in_ote = _overlaps_ote(elegida, ote_box)
+    zone_dict: Dict[str, Any] = {
+        "bottom": elegida["bottom"],
+        "top": elegida["top"],
+        "kind": elegida["kind"],
+        "price": entry_price,
+    }
+    if fib_ote is not None:
+        zone_dict["in_ote"] = in_ote
 
     return {
-        "zone": {"bottom": elegida["bottom"], "top": elegida["top"],
-                 "kind": elegida["kind"], "price": entry_price},
+        "zone": zone_dict,
         "reason": ZONE_OK,
         "span": span,
+        "in_ote": in_ote,
     }
 
 
@@ -309,6 +360,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     analysis = snapshot.get("analysis") or {}
     patterns = (analysis.get("patterns")) or {}
     htf_ctx = analysis.get("htf_context")
+    fib_ote = analysis.get("fib_ote") or snapshot.get("fib_ote")
 
     sl_dist, sl_origin = strategy.sl_distance_for(cfg, symbol or None, spec)
     tp_ratio = strategy.tp_ratio_for(cfg)
@@ -339,7 +391,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         if dealing_zone == "DISCOUNT":
             # En Discount (Piso) está prohibido vender; priorizamos compras si hay zona alcista
             if direction == "SELL" and re_.get("bull"):
-                z_buy = entry_zone(patterns, price, "BUY", span_limit)
+                z_buy = entry_zone(patterns, price, "BUY", span_limit, fib_ote=fib_ote)
                 if z_buy.get("zone") is not None:
                     direction = "BUY"
                     mejor = re_.get("bull")
@@ -357,7 +409,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         else:
             # En Premium (Techo) está prohibido comprar; priorizamos ventas si hay zona bajista
             if direction == "BUY" and re_.get("bear"):
-                z_sell = entry_zone(patterns, price, "SELL", span_limit)
+                z_sell = entry_zone(patterns, price, "SELL", span_limit, fib_ote=fib_ote)
                 if z_sell.get("zone") is not None:
                     direction = "SELL"
                     mejor = re_.get("bear")
@@ -392,11 +444,13 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
             htf_conf = None
             htf_bonus = 0.0
 
-    score_effective = round(min(100.0, max(0.0, base_score + htf_bonus + location_bonus)), 1)
-    verdict = risk_engine.grade_score(score_effective)
-
-    zone = entry_zone(patterns, price, direction, span_limit)
+    zone = entry_zone(patterns, price, direction, span_limit, fib_ote=fib_ote)
     elegida = zone.get("zone")
+    in_ote = bool(zone.get("in_ote"))
+    ote_bonus = 8.0 if in_ote else 0.0
+
+    score_effective = round(min(100.0, max(0.0, base_score + htf_bonus + location_bonus + ote_bonus)), 1)
+    verdict = risk_engine.grade_score(score_effective)
     if elegida:
         # Invalidación estructural: borde distal de la zona de entrada elegida
         invalidation = float(elegida["bottom"]) if direction == "BUY" else float(elegida["top"])
@@ -505,6 +559,8 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         "base_score": base_score,
         "htf_score_bonus": htf_bonus,
         "location_score_bonus": location_bonus,
+        "ote_score_bonus": ote_bonus,
+        "in_ote": in_ote,
         "dealing_zone": dealing_zone,
         "range_position_pct": round(range_pos_pct, 1) if range_pos_pct is not None else None,
         "htf_confluence": htf_conf,

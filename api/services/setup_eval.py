@@ -176,6 +176,8 @@ def evaluate(snapshot: Dict[str, Any],
         ret["base_score"] = gate["base_score"]
         ret["htf_score_bonus"] = gate.get("htf_score_bonus", 0.0)
         ret["location_score_bonus"] = gate.get("location_score_bonus", 0.0)
+        ret["ote_score_bonus"] = gate.get("ote_score_bonus", 0.0)
+        ret["in_ote"] = bool(gate.get("in_ote"))
         ret["dealing_zone"] = gate.get("dealing_zone")
         ret["range_position_pct"] = gate.get("range_position_pct")
         ret["score_with_htf"] = gate["score"]

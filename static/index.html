@@ -5036,7 +5036,8 @@
 
       // Parámetros calculados (formateados según decimales del símbolo)
       const entryPriceFormatted = data.entry != null ? formatPrice(data.entry, reqSymbol) : (data.current_price != null ? formatPrice(data.current_price, reqSymbol) : '—');
-      const entryTypeTag = isLimit ? ` <span style="font-size:0.67rem; color:var(--accent, #38bdf8); font-weight:600;">(Límite)</span>` : '';
+      const oteTag = data.in_ote ? ' · 🎯 OTE' : '';
+      const entryTypeTag = isLimit ? ` <span style="font-size:0.67rem; color:var(--accent, #38bdf8); font-weight:600;">(Límite${oteTag})</span>` : (data.in_ote ? ` <span style="font-size:0.67rem; color:#a855f7; font-weight:600;">(🎯 OTE)</span>` : '');
       $('param-entry').innerHTML = `${entryPriceFormatted}${entryTypeTag}`;
       $('param-sl').textContent = data.sl != null ? formatPrice(data.sl, reqSymbol) : '—';
       $('param-tp').textContent = data.tp != null ? formatPrice(data.tp, reqSymbol) : '—';

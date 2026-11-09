@@ -257,10 +257,54 @@ def detect_sweeps(candles: List[dict], pdh: Optional[float], pdl: Optional[float
     return out
 
 
+def compute_ote_dealing_range(candles: List[dict], lookback: int = 80) -> Optional[Dict[str, Any]]:
+    """Calcula el Dealing Range activo y los bolsillos Fibonacci OTE (0.618 - 0.786).
+
+    - En BUY (retroceso alcista desde swing_high hacia swing_low):
+      el Golden Pocket OTE va de `swing_high - 0.618 * span` (top) a `swing_high - 0.786 * span` (bottom).
+    - En SELL (retroceso bajista desde swing_low hacia swing_high):
+      el Golden Pocket OTE va de `swing_low + 0.618 * span` (bottom) a `swing_low + 0.786 * span` (top).
+    """
+    if not candles or len(candles) < 3:
+        return None
+    recent = candles[-lookback:] if len(candles) > lookback else candles
+    highs, lows = swing_pivots(recent, window=min(BOS_WINDOW, max(1, len(recent) // 4)))
+    if highs and lows:
+        swing_high = max(float(recent[i]["high"]) for i in highs[-3:])
+        swing_low = min(float(recent[i]["low"]) for i in lows[-3:])
+        # Asegurar que cubra también el extremo reciente si el impulso sigue en curso
+        swing_high = max(swing_high, max(float(c["high"]) for c in recent[-10:]))
+        swing_low = min(swing_low, min(float(c["low"]) for c in recent[-10:]))
+    else:
+        swing_high = max(float(c["high"]) for c in recent)
+        swing_low = min(float(c["low"]) for c in recent)
+
+    span = swing_high - swing_low
+    if span <= 1e-9:
+        return None
+
+    eq_50 = swing_low + span * 0.50
+    return {
+        "swing_low": _r6(swing_low),
+        "swing_high": _r6(swing_high),
+        "eq_50": _r6(eq_50),
+        "buy_ote": {
+            "top": _r6(swing_high - span * 0.618),
+            "optimal": _r6(swing_high - span * 0.705),
+            "bottom": _r6(swing_high - span * 0.786),
+        },
+        "sell_ote": {
+            "bottom": _r6(swing_low + span * 0.618),
+            "optimal": _r6(swing_low + span * 0.705),
+            "top": _r6(swing_low + span * 0.786),
+        },
+    }
+
+
 def analyze(candles: List[dict], pdh: Optional[float], pdl: Optional[float],
             symbol: str = "", timeframe: str = "",
             min_sweep_time: Optional[int] = None) -> dict:
-    """El análisis SMC completo: fvgs + order_blocks + sweeps.
+    """El análisis SMC completo: fvgs + order_blocks + sweeps + fib_ote.
 
     Es la pieza que consume `/api/market/analysis` (y el watcher más adelante).
     """
@@ -272,6 +316,7 @@ def analyze(candles: List[dict], pdh: Optional[float], pdl: Optional[float],
             "order_blocks": detect_order_blocks(candles),
             "sweeps": detect_sweeps(candles, pdh, pdl, min_time=min_sweep_time),
         },
+        "fib_ote": compute_ote_dealing_range(candles),
         "atr_14": calculate_atr(candles, period=14),
     }
 

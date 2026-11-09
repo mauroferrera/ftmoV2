@@ -304,5 +304,37 @@ class TestEvaluateGate:
         assert plan_buy_ok["location_score_bonus"] == 10.0
         assert plan_buy_ok["approved"] is True
 
+    def test_selector_inteligente_fibonacci_ote_y_bonus(self):
+        """Si hay 2 cajas alcanzables (una superficial y otra en Golden Pocket OTE), elige la OTE y suma +8 pts."""
+        snap = _snapshot(direccion="BUY", price=1.1020)
+        # Dos cajas alcistas alcanzables dentro del max_span (con sl_dist=0.0050 -> max_span=0.0025):
+        # 1) Caja superficial en 0.236 (1.1015 - 1.1018)
+        # 2) Caja profunda en Golden Pocket OTE 0.618-0.786 (1.1000 - 1.1006)
+        snap["analysis"]["patterns"] = {
+            "fvgs": [{"type": "BULLISH_FVG", "bottom": 1.1015, "top": 1.1018}],
+            "order_blocks": [{"type": "BULLISH_OB", "bottom": 1.1000, "top": 1.1006}],
+            "sweeps": [{"type": "PDL_SWEEP"}],
+        }
+        snap["analysis"]["fib_ote"] = {
+            "swing_low": 1.0990,
+            "swing_high": 1.1030,
+            "eq_50": 1.1010,
+            "buy_ote": {
+                "top": 1.1005,     # 0.618
+                "optimal": 1.1002, # 0.705
+                "bottom": 1.0998,  # 0.786
+            },
+        }
+        snap["risk_engine"]["bull"]["score"] = 60.0
+        cfg_ote = {"sl_distance_by_symbol": {"EURUSD": 0.0050}, "tp_ratio_r": 2.0, "min_score": 65.0}
+        plan = setup_gate.evaluate_gate(snap, cfg_ote)
+        # Elige el Order Block en OTE (top=1.1006) en lugar del FVG superficial (top=1.1018)
+        assert plan["entry"] == 1.1006
+        assert plan["in_ote"] is True
+        assert plan["ote_score_bonus"] == 8.0
+        assert plan["score"] == 68.0
+        assert plan["approved"] is True
+
+
 
 
