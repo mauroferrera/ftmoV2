@@ -1,15 +1,27 @@
 {
-  "plan_id": "PLAN-20261109-0321",
-  "generated_at_utc": "2026-11-09T03:21:05+00:00",
-  "valid_from_utc": "2026-11-09T03:21:04Z",
-  "valid_to_utc": "2026-11-09T04:01:04Z",
+  "plan_id": "PLAN-20261109-0328",
+  "generated_at_utc": "2026-11-09T03:28:40+00:00",
+  "valid_from_utc": "2026-11-09T03:28:39Z",
+  "valid_to_utc": "2026-11-09T04:08:39Z",
   "duration_minutes": 40,
   "reason": "ARRANQUE_SISTEMA_SCAN_COMPLETO",
-  "next_run_utc": "2026-11-09T04:01:04Z",
+  "next_run_utc": "2026-11-09T04:08:39Z",
   "next_trigger_label": "Ciclo regular (40 minutos)",
   "next_event_scheduled": null,
   "scheduled_news_count": 0,
   "scheduled_news": [],
+  "tribunal_intel": {
+    "has_tribunal": true,
+    "bias": "bajista",
+    "confidence": 62,
+    "status": "RIESGO_REDUCIDO",
+    "bank_bear_pct": 50.0,
+    "bank_bull_pct": 30.0,
+    "dollar_bias": "alcista",
+    "ruling": "Aunque el marco temporal H1 muestra una estructura claramente bajista que favorece posiciones vendedoras, el momentum a corto plazo en M15 presenta un sesgo neutral/alcista temporal (RSI en 63.84). Por tanto, se adopta un perfil de riesgo reducido (0.25%), priorizando operaciones de venta solo ante reyecciones en los bloques bajistas superiores (Bearish FVG / OB) o ruptura confirmada del soporte en 1.11309.",
+    "run_time": "07",
+    "generated_at_utc": "2026-11-09T00:46:59+00:00"
+  },
   "active_pairs_count": 12,
   "pairs": {
     "AUDCAD": {
@@ -17,11 +29,11 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 0.97276,
+      "current_price": 0.97272,
       "pdh": 0.97299,
       "pdl": 0.9649,
       "eq_50": 0.96894,
-      "location_pct": 97.2,
+      "location_pct": 96.7,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         0.97097,
@@ -31,7 +43,8 @@
       "tp_suggested": 0.96894,
       "invalidation": 0.97639,
       "trigger_condition": "Esperar precio en zona Premium [0.97097 - 0.97299] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy caro (97.2% del rango). Techo institucional PDH (0.97299) cerca. Solo ventas en absorción.",
+      "rationale": "Precio muy caro (96.7% del rango). Techo institucional PDH (0.97299) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "",
       "is_manual_only": false
     },
     "AUDCHF": {
@@ -39,11 +52,11 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 0.56613,
+      "current_price": 0.56607,
       "pdh": 0.56679,
       "pdl": 0.56054,
       "eq_50": 0.56367,
-      "location_pct": 89.4,
+      "location_pct": 88.5,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         0.56523,
@@ -53,7 +66,8 @@
       "tp_suggested": 0.56367,
       "invalidation": 0.56929,
       "trigger_condition": "Esperar precio en zona Premium [0.56523 - 0.56679] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy caro (89.4% del rango). Techo institucional PDH (0.56679) cerca. Solo ventas en absorción.",
+      "rationale": "Precio muy caro (88.5% del rango). Techo institucional PDH (0.56679) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "",
       "is_manual_only": false
     },
     "AUDJPY": {
@@ -61,11 +75,11 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 109.168,
+      "current_price": 109.152,
       "pdh": 109.535,
       "pdl": 108.237,
       "eq_50": 108.886,
-      "location_pct": 71.7,
+      "location_pct": 70.5,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         109.2105,
@@ -75,7 +89,8 @@
       "tp_suggested": 108.886,
       "invalidation": 109.9225,
       "trigger_condition": "Esperar precio en zona Premium [109.21050 - 109.53500] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy caro (71.7% del rango). Techo institucional PDH (109.53500) cerca. Solo ventas en absorción.",
+      "rationale": "Precio muy caro (70.5% del rango). Techo institucional PDH (109.53500) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "",
       "is_manual_only": false
     },
     "AUDNZD": {
@@ -83,7 +98,7 @@
       "mandate": "COMPRA_EN_DISCOUNT",
       "bias": "alcista",
       "status": "ACTIVO",
-      "current_price": 1.23488,
+      "current_price": 1.2349700000000001,
       "pdh": 1.24277,
       "pdl": 1.23547,
       "eq_50": 1.23912,
@@ -98,6 +113,7 @@
       "invalidation": 1.23132,
       "trigger_condition": "Esperar precio en zona Discount [1.23547 - 1.23730] + Barra de Volumen VSA en TradingView",
       "rationale": "Precio muy barato (0.0% del rango). Piso institucional PDL (1.23547) cerca. Solo compras en absorción.",
+      "tribunal_alignment": "",
       "is_manual_only": false
     },
     "AUDUSD": {
@@ -105,18 +121,19 @@
       "mandate": "ESPERAR_ZONA",
       "bias": "neutral",
       "status": "ACTIVO",
-      "current_price": 0.68944,
+      "current_price": 0.68934,
       "pdh": 0.69422,
       "pdl": 0.68542,
       "eq_50": 0.68982,
-      "location_pct": 45.7,
+      "location_pct": 44.5,
       "zone_type": "EQUILIBRIUM",
       "entry_zone": null,
       "sl_suggested": null,
       "tp_suggested": null,
       "invalidation": null,
       "trigger_condition": "Precio en 50% Equilibrium. No perseguir en el centro; esperar retroceso a OTE o llegada a extremos.",
-      "rationale": "Precio en zona neutral (45.7%). Prohibido entrar en el medio del rango sin confirmación clara.",
+      "rationale": "Precio en zona neutral (44.5%). Prohibido entrar en el medio del rango sin confirmación clara.",
+      "tribunal_alignment": "⚠️ PRESIÓN DXY FUERTE (Dólar fuerte en contra)",
       "is_manual_only": false
     },
     "EURJPY": {
@@ -124,18 +141,19 @@
       "mandate": "ESPERAR_ZONA",
       "bias": "neutral",
       "status": "ACTIVO",
-      "current_price": 176.619,
+      "current_price": 176.598,
       "pdh": 177.167,
       "pdl": 176.159,
       "eq_50": 176.663,
-      "location_pct": 45.6,
+      "location_pct": 43.6,
       "zone_type": "EQUILIBRIUM",
       "entry_zone": null,
       "sl_suggested": null,
       "tp_suggested": null,
       "invalidation": null,
       "trigger_condition": "Precio en 50% Equilibrium. No perseguir en el centro; esperar retroceso a OTE o llegada a extremos.",
-      "rationale": "Precio en zona neutral (45.6%). Prohibido entrar en el medio del rango sin confirmación clara.",
+      "rationale": "Precio en zona neutral (43.6%). Prohibido entrar en el medio del rango sin confirmación clara.",
+      "tribunal_alignment": "",
       "is_manual_only": false
     },
     "EURUSD": {
@@ -143,11 +161,11 @@
       "mandate": "COMPRA_EN_DISCOUNT",
       "bias": "alcista",
       "status": "ACTIVO",
-      "current_price": 1.11543,
+      "current_price": 1.11526,
       "pdh": 1.12348,
       "pdl": 1.11309,
       "eq_50": 1.11828,
-      "location_pct": 22.5,
+      "location_pct": 20.9,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         1.11309,
@@ -157,7 +175,8 @@
       "tp_suggested": 1.11828,
       "invalidation": 1.11059,
       "trigger_condition": "Esperar precio en zona Discount [1.11309 - 1.11569] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy barato (22.5% del rango). Piso institucional PDL (1.11309) cerca. Solo compras en absorción.",
+      "rationale": "Precio muy barato (20.9% del rango). Piso institucional PDL (1.11309) cerca. Solo compras en absorción. Cautela: El Tribunal y bancos proyectan presión bajista. Tomar TP en 50% Equilibrium.",
+      "tribunal_alignment": "⚠️ CAUTELA: Piso Discount pero Tribunal Macro Bajista (62% conf)",
       "is_manual_only": false
     },
     "GBPUSD": {
@@ -165,11 +184,11 @@
       "mandate": "COMPRA_EN_DISCOUNT",
       "bias": "alcista",
       "status": "ACTIVO",
-      "current_price": 1.33716,
+      "current_price": 1.33704,
       "pdh": 1.34637,
       "pdl": 1.33422,
       "eq_50": 1.3403,
-      "location_pct": 24.2,
+      "location_pct": 23.2,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         1.33422,
@@ -179,7 +198,8 @@
       "tp_suggested": 1.3403,
       "invalidation": 1.33172,
       "trigger_condition": "Esperar precio en zona Discount [1.33422 - 1.33726] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy barato (24.2% del rango). Piso institucional PDL (1.33422) cerca. Solo compras en absorción.",
+      "rationale": "Precio muy barato (23.2% del rango). Piso institucional PDL (1.33422) cerca. Solo compras en absorción.",
+      "tribunal_alignment": "⚠️ PRESIÓN DXY FUERTE (Dólar fuerte en contra)",
       "is_manual_only": false
     },
     "USDCAD": {
@@ -187,11 +207,11 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 1.41109,
+      "current_price": 1.41122,
       "pdh": 1.41376,
       "pdl": 1.39945,
       "eq_50": 1.4066,
-      "location_pct": 81.3,
+      "location_pct": 82.3,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         1.41018,
@@ -201,7 +221,8 @@
       "tp_suggested": 1.4066,
       "invalidation": 1.41716,
       "trigger_condition": "Esperar precio en zona Premium [1.41018 - 1.41376] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy caro (81.3% del rango). Techo institucional PDH (1.41376) cerca. Solo ventas en absorción.",
+      "rationale": "Precio muy caro (82.3% del rango). Techo institucional PDH (1.41376) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "⚡ IMPULSO DXY ALCISTA (Dólar fuerte en Tribunal)",
       "is_manual_only": false
     },
     "USDCHF": {
@@ -209,11 +230,11 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 0.82115,
+      "current_price": 0.82119,
       "pdh": 0.82205,
       "pdl": 0.81457,
       "eq_50": 0.81831,
-      "location_pct": 88.0,
+      "location_pct": 88.5,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         0.82018,
@@ -223,7 +244,8 @@
       "tp_suggested": 0.81831,
       "invalidation": 0.82455,
       "trigger_condition": "Esperar precio en zona Premium [0.82018 - 0.82205] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy caro (88.0% del rango). Techo institucional PDH (0.82205) cerca. Solo ventas en absorción.",
+      "rationale": "Precio muy caro (88.5% del rango). Techo institucional PDH (0.82205) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "⚡ IMPULSO DXY ALCISTA (Dólar fuerte en Tribunal)",
       "is_manual_only": false
     },
     "USDJPY": {
@@ -231,11 +253,11 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 158.341,
+      "current_price": 158.345,
       "pdh": 158.583,
       "pdl": 157.255,
       "eq_50": 157.919,
-      "location_pct": 81.8,
+      "location_pct": 82.1,
       "zone_type": "FIBO_OTE_EXTREMO",
       "entry_zone": [
         158.251,
@@ -245,7 +267,8 @@
       "tp_suggested": 157.919,
       "invalidation": 158.9705,
       "trigger_condition": "Esperar precio en zona Premium [158.25100 - 158.58300] + Barra de Volumen VSA en TradingView",
-      "rationale": "Precio muy caro (81.8% del rango). Techo institucional PDH (158.58300) cerca. Solo ventas en absorción.",
+      "rationale": "Precio muy caro (82.1% del rango). Techo institucional PDH (158.58300) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "⚡ IMPULSO DXY ALCISTA (Dólar fuerte en Tribunal)",
       "is_manual_only": false
     },
     "XAUUSD": {
@@ -253,7 +276,7 @@
       "mandate": "VENTA_EN_PREMIUM",
       "bias": "bajista",
       "status": "ACTIVO",
-      "current_price": 4118.83,
+      "current_price": 4116.57,
       "pdh": 4106.88,
       "pdl": 3914.4,
       "eq_50": 4010.64,
@@ -268,6 +291,7 @@
       "invalidation": 4116.88,
       "trigger_condition": "Esperar precio en zona Premium [4058.76000 - 4106.88000] + Barra de Volumen VSA en TradingView",
       "rationale": "Precio muy caro (100.0% del rango). Techo institucional PDH (4106.88000) cerca. Solo ventas en absorción.",
+      "tribunal_alignment": "⚠️ PRESIÓN DXY FUERTE (Dólar fuerte en contra)",
       "is_manual_only": true
     }
   }

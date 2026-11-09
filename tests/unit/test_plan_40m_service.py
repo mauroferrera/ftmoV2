@@ -175,3 +175,4 @@ def test_plan_with_vigilante_status(tmp_path):
     assert vig["open_positions_count"] == 1
     assert vig["open_positions"][0]["ticket"] == 123456
     assert vig["open_positions"][0]["be_applied"] is True
+

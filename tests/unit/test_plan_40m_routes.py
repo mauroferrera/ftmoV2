@@ -54,3 +54,4 @@ def test_plan_40m_routes_get_and_trigger(tmp_path):
     assert resp_get2.status_code == 200
     data2 = resp_get2.json()
     assert data2["plan"]["plan_id"] == data1["plan"]["plan_id"]
+

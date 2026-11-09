@@ -273,7 +273,58 @@ class Plan40mService:
             self._next_run_utc = target_end
             self._next_trigger_reason = next_trigger_label
 
-            # 3. Deliberación por Símbolo / Par para todas las monedas
+            # 3. Integración viva con el Tribunal e Inteligencia (MT5 + SMC + Web + Consenso Bancario)
+            tribunal_intel: Dict[str, Any] = {
+                "has_tribunal": False,
+                "bias": "neutral",
+                "confidence": 50,
+                "status": "APROBADO",
+                "bank_sentiment": "neutral",
+                "bank_bear_pct": 50.0,
+                "bank_bull_pct": 30.0,
+                "dollar_bias": "neutral",
+                "ruling": "",
+            }
+            try:
+                from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
+                from core.bank_consensus import load_bank_analyses_data
+
+                spot_svc = EurUsdSpotAnalysisService()
+                latest_spot = spot_svc.get_latest()
+                bank_data = load_bank_analyses_data()
+
+                # Consenso bancario (ING, Danske, Rabobank, etc.)
+                b_meta = (bank_data.get("metadata") or {}).get("consensus") or {}
+                b_dist = b_meta.get("bias_distribution") or {}
+                b_bear = float(b_dist.get("bearish") or 50.0)
+                b_bull = float(b_dist.get("bullish") or 30.0)
+
+                if latest_spot:
+                    payload = json.loads(latest_spot.get("payload_json") or "{}")
+                    t_verdict = (payload.get("tribunal") or {}).get("verdict") or {}
+                    t_bias = str(latest_spot.get("bias") or "neutral").lower()
+                    t_conf = int(latest_spot.get("confidence") or 50)
+                    t_status = str(t_verdict.get("status") or "APROBADO").upper()
+
+                    # Brújula del Dólar: Si el Tribunal ve EUR/USD bajista, el Dólar (DXY) empuja al alza
+                    d_bias = "alcista" if t_bias == "bajista" else ("bajista" if t_bias == "alcista" else "neutral")
+
+                    tribunal_intel = {
+                        "has_tribunal": True,
+                        "bias": t_bias,
+                        "confidence": t_conf,
+                        "status": t_status,
+                        "bank_bear_pct": b_bear,
+                        "bank_bull_pct": b_bull,
+                        "dollar_bias": d_bias,
+                        "ruling": str(t_verdict.get("ruling") or ""),
+                        "run_time": latest_spot.get("run_time"),
+                        "generated_at_utc": latest_spot.get("generated_at_utc"),
+                    }
+            except Exception as exc:
+                log.debug("No se pudo incorporar data del Tribunal en Plan 40m: %s", exc)
+
+            # 4. Deliberación por Símbolo / Par para todas las monedas
             market_svc = getattr(self._rt, "market", None) if self._rt else None
             active_symbols = get_configured_symbols()
             if "XAUUSD" not in active_symbols:
@@ -285,11 +336,12 @@ class Plan40mService:
                     symbol=sym,
                     market_svc=market_svc,
                     upcoming_news=upcoming,
+                    tribunal_intel=tribunal_intel,
                     now=now,
                 )
                 pair_plans[sym] = plan_sym
 
-            # 4. Ensamblar documento del Plan 40 Minutos
+            # 5. Ensamblar documento del Plan 40 Minutos
             plan_doc: Dict[str, Any] = {
                 "plan_id": f"PLAN-{now.strftime('%Y%m%d-%H%M')}",
                 "generated_at_utc": clock.now_iso(),
@@ -302,6 +354,7 @@ class Plan40mService:
                 "next_event_scheduled": next_event,
                 "scheduled_news_count": len(upcoming),
                 "scheduled_news": upcoming[:10],
+                "tribunal_intel": tribunal_intel,
                 "active_pairs_count": len(pair_plans),
                 "pairs": pair_plans,
             }
@@ -328,7 +381,8 @@ class Plan40mService:
         symbol: str,
         market_svc: Optional[Any],
         upcoming_news: List[Dict[str, Any]],
-        now: datetime,
+        tribunal_intel: Optional[Dict[str, Any]] = None,
+        now: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Delibera la estrategia técnica, niveles y mandato específico para un par."""
         sym_clean = symbol.upper().replace("/", "")
@@ -454,11 +508,62 @@ class Plan40mService:
             cond = "Precio en 50% Equilibrium. No perseguir en el centro; esperar retroceso a OTE o llegada a extremos."
             ratio_txt = f"Precio en zona neutral ({loc_pct}%). Prohibido entrar en el medio del rango sin confirmación clara."
 
+        # E) Confluencia e Inteligencia del Tribunal y Consenso Bancario
+        tribunal_alignment = ""
+        status_plan = "ACTIVO"
+        t_info = tribunal_intel or {}
+        t_bias = str(t_info.get("bias") or "neutral").lower()
+        t_status = str(t_info.get("status") or "APROBADO").upper()
+        d_bias = str(t_info.get("dollar_bias") or "neutral").lower()
+
+        if sym_clean == "EURUSD":
+            if t_status == "VETO":
+                mandate = "PAUSA_VETO_TRIBUNAL"
+                status_plan = "VETO"
+                tribunal_alignment = "⛔ VETO DEL TRIBUNAL: Evento de riesgo extremo o invalidación macro"
+                ratio_txt = f"VETO activo del Tribunal Cuantitativo: {t_info.get('ruling', 'Operativa suspendida por riesgo')}"
+            else:
+                conf = t_info.get("confidence", 50)
+                bear_pct = t_info.get("bank_bear_pct", 50.0)
+                if mandate == "VENTA_EN_PREMIUM" and t_bias == "bajista":
+                    tribunal_alignment = f"🌟 ALTA CONFLUENCIA: Techo Premium + Tribunal y Bancos Bajistas ({conf}% conf)"
+                    ratio_txt += f" Respaldado por el Tribunal Macro y {bear_pct:.0f}% de consenso bancario bajista."
+                elif mandate == "COMPRA_EN_DISCOUNT" and t_bias == "alcista":
+                    tribunal_alignment = f"🌟 ALTA CONFLUENCIA: Piso Discount + Tribunal Alcista ({conf}% conf)"
+                    ratio_txt += f" Respaldado por el Tribunal Macro ({conf}% conf)."
+                elif mandate == "COMPRA_EN_DISCOUNT" and t_bias == "bajista":
+                    tribunal_alignment = f"⚠️ CAUTELA: Piso Discount pero Tribunal Macro Bajista ({conf}% conf)"
+                    ratio_txt += f" Cautela: El Tribunal y bancos proyectan presión bajista. Tomar TP en 50% Equilibrium."
+                elif mandate == "VENTA_EN_PREMIUM" and t_bias == "alcista":
+                    tribunal_alignment = f"⚠️ CAUTELA: Techo Premium pero Tribunal Macro Alcista ({conf}% conf)"
+                    ratio_txt += f" Cautela: El Tribunal proyecta fuerza compradora. Salida estricta en 50% Equilibrium."
+                else:
+                    tribunal_alignment = f"⚖️ Tribunal EUR/USD: {t_bias.upper()} ({conf}% conf) | Bancos: {bear_pct:.0f}% Bear"
+        elif "USD" in sym_clean:
+            # Pares vinculados al Dólar (Brújula DXY del Tribunal)
+            is_usd_base = sym_clean.startswith("USD")
+            if is_usd_base:
+                # USDCAD, USDCHF, USDJPY
+                if d_bias == "alcista":
+                    tribunal_alignment = "⚡ IMPULSO DXY ALCISTA (Dólar fuerte en Tribunal)"
+                    if mandate == "COMPRA_EN_DISCOUNT":
+                        tribunal_alignment = "🌟 ALTA CONFLUENCIA: Discount + Impulso Dólar Fuerte"
+                elif d_bias == "bajista":
+                    tribunal_alignment = "⚠️ PRESIÓN DXY BAJISTA (Dólar débil en Tribunal)"
+            else:
+                # GBPUSD, AUDUSD
+                if d_bias == "alcista":
+                    tribunal_alignment = "⚠️ PRESIÓN DXY FUERTE (Dólar fuerte en contra)"
+                elif d_bias == "bajista":
+                    tribunal_alignment = "⚡ IMPULSO DXY BAJISTA (Viento a favor de compras)"
+                    if mandate == "COMPRA_EN_DISCOUNT":
+                        tribunal_alignment = "🌟 ALTA CONFLUENCIA: Discount + Viento a favor (USD débil)"
+
         return {
             "symbol": sym_clean,
             "mandate": mandate,
             "bias": bias,
-            "status": "ACTIVO",
+            "status": status_plan,
             "current_price": current_price,
             "pdh": pdh,
             "pdl": pdl,
@@ -471,6 +576,7 @@ class Plan40mService:
             "invalidation": inv_level,
             "trigger_condition": cond,
             "rationale": ratio_txt,
+            "tribunal_alignment": tribunal_alignment,
             "is_manual_only": is_gold,
         }
 

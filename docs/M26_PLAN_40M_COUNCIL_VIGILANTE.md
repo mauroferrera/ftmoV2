@@ -87,3 +87,4 @@ En el modal de **⚖️ Tribunal e Inteligencia (MT5 + SMC + Web)** se añadió 
   Retorna el estado de vigencia, minutos restantes, el plan completo de 40 minutos con los pares y el estado en tiempo real del vigilante.
 - `POST /api/analysis/eurusd-spot/plan-40m/trigger` (y alias `/api/analysis/plan-40m/trigger`):
   Fuerza una re-deliberación inmediata del Comité y emite un nuevo plan de 40 minutos.
+
