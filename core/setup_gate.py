@@ -368,8 +368,37 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     digits = _spec_attr(spec, "digits", 6)
     point = _spec_attr(spec, "point", 0.00001)
 
-    # Regla 1 (Premium vs. Discount): Comprar barato en el Piso (Discount <= 50%)
-    # y Vender caro en el Techo (Premium > 50%). Prohibido vender en el piso o comprar en el techo.
+    # 1. Contexto HTF y Noticias/Macro para distinguir Día de Rango (Giro) vs Día de Continuidad (Tendencia/Noticias)
+    def _calc_htf(dir_cand: str) -> Tuple[Optional[Dict[str, Any]], float]:
+        if isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
+            try:
+                hc = smc_engine.evaluate_htf_confluence(
+                    htf_ctx, direction=dir_cand, current_price=price
+                )
+                return hc, float(hc.get("score_bonus") or 0.0)
+            except Exception:  # noqa: BLE001
+                return None, 0.0
+        return None, 0.0
+
+    htf_conf, htf_bonus = _calc_htf(direction)
+    macro_ctx = snapshot.get("macro_confluence") if isinstance(snapshot.get("macro_confluence"), dict) else {}
+
+    def _has_continuity_for(dir_cand: str, h_bonus: float) -> bool:
+        m_bias = str(macro_ctx.get("bias") or "").lower()
+        m_conf = float(macro_ctx.get("confidence") or 0.0)
+        m_veto = str(macro_ctx.get("verdict_status") or "").upper() == "VETO"
+        macro_ok = (
+            not m_veto
+            and m_conf >= 60.0
+            and ((dir_cand == "BUY" and m_bias == "alcista") or (dir_cand == "SELL" and m_bias == "bajista"))
+        )
+        return (h_bonus >= 4.0) or macro_ok
+
+    # 2. Zona de entrada (OB / FVG + Selector Inteligente Fibonacci OTE 0.618-0.786)
+    zone = entry_zone(patterns, price, direction, span_limit, fib_ote=fib_ote)
+    elegida = zone.get("zone")
+
+    # 3. Regla Ubicación Inteligente (Premium vs. Discount + Excepción de Continuidad por Tendencia HTF / Noticias)
     pdh = _num(snapshot.get("pdh"))
     pdl = _num(snapshot.get("pdl"))
     if pdh is None and isinstance(htf_ctx, dict):
@@ -382,48 +411,78 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     location_bonus = 0.0
     location_blocked = False
     location_reason: Optional[str] = None
+    continuity_mode = False
 
-    if pdh is not None and pdl is not None and pdh > pdl and price is not None:
+    # Evaluamos la ubicación sobre el nivel planeado de entrada (o el precio actual si es a mercado)
+    eval_px = _num(elegida.get("price")) if elegida else price
+    if eval_px is None:
+        eval_px = price
+
+    if pdh is not None and pdl is not None and pdh > pdl and eval_px is not None:
         eq_50 = (pdh + pdl) / 2.0
-        range_pos_pct = ((price - pdl) / (pdh - pdl)) * 100.0
-        dealing_zone = "DISCOUNT" if price <= eq_50 else "PREMIUM"
+        range_pos_pct = ((eval_px - pdl) / (pdh - pdl)) * 100.0
+        dealing_zone = "DISCOUNT" if eval_px <= eq_50 else "PREMIUM"
+        has_cont = _has_continuity_for(direction, htf_bonus)
 
         if dealing_zone == "DISCOUNT":
-            # En Discount (Piso) está prohibido vender; priorizamos compras si hay zona alcista
-            if direction == "SELL" and re_.get("bull"):
-                z_buy = entry_zone(patterns, price, "BUY", span_limit, fib_ote=fib_ote)
-                if z_buy.get("zone") is not None:
-                    direction = "BUY"
-                    mejor = re_.get("bull")
-                    scores_empatados = False
             if direction == "BUY":
                 if range_pos_pct <= 35.0:
                     location_bonus = 10.0
             else:
-                location_blocked = True
-                location_reason = (
-                    f"Precio en Zona Barata / Discount ({range_pos_pct:.0f}% del rango diario, "
-                    f"piso PDL {_fmt(pdl, digits)}): prohibido vender en el piso; "
-                    "esperando compras o rebote a zona cara (Premium)."
-                )
+                # SELL en Discount: permitido SI hay Continuidad Macro/Noticias o Tendencia HTF + Caja OB/FVG de retroceso
+                if has_cont and elegida is not None:
+                    continuity_mode = True
+                else:
+                    # Sin catalizador de continuidad: buscamos giro alcista (BUY) si hay zona, o bloqueamos vender en el piso
+                    switched = False
+                    if re_.get("bull"):
+                        z_buy = entry_zone(patterns, price, "BUY", span_limit, fib_ote=fib_ote)
+                        if z_buy.get("zone") is not None:
+                            direction = "BUY"
+                            mejor = re_.get("bull")
+                            scores_empatados = False
+                            zone = z_buy
+                            elegida = zone.get("zone")
+                            htf_conf, htf_bonus = _calc_htf("BUY")
+                            if range_pos_pct <= 35.0:
+                                location_bonus = 10.0
+                            switched = True
+                    if not switched:
+                        location_blocked = True
+                        location_reason = (
+                            f"Precio en Zona Barata / Discount ({range_pos_pct:.0f}% del rango diario, "
+                            f"piso PDL {_fmt(pdl, digits)}): sin tendencia HTF ni noticias de continuidad, "
+                            "prohibido vender en el piso."
+                        )
         else:
-            # En Premium (Techo) está prohibido comprar; priorizamos ventas si hay zona bajista
-            if direction == "BUY" and re_.get("bear"):
-                z_sell = entry_zone(patterns, price, "SELL", span_limit, fib_ote=fib_ote)
-                if z_sell.get("zone") is not None:
-                    direction = "SELL"
-                    mejor = re_.get("bear")
-                    scores_empatados = False
             if direction == "SELL":
                 if range_pos_pct >= 65.0:
                     location_bonus = 10.0
             else:
-                location_blocked = True
-                location_reason = (
-                    f"Precio en Zona Cara / Premium ({range_pos_pct:.0f}% del rango diario, "
-                    f"techo PDH {_fmt(pdh, digits)}): prohibido comprar en el techo; "
-                    "esperando ventas o caída a zona barata (Discount)."
-                )
+                # BUY en Premium: permitido SI hay Continuidad Macro/Noticias o Tendencia HTF + Caja OB/FVG de retroceso
+                if has_cont and elegida is not None:
+                    continuity_mode = True
+                else:
+                    switched = False
+                    if re_.get("bear"):
+                        z_sell = entry_zone(patterns, price, "SELL", span_limit, fib_ote=fib_ote)
+                        if z_sell.get("zone") is not None:
+                            direction = "SELL"
+                            mejor = re_.get("bear")
+                            scores_empatados = False
+                            zone = z_sell
+                            elegida = zone.get("zone")
+                            htf_conf, htf_bonus = _calc_htf("SELL")
+                            if range_pos_pct >= 65.0:
+                                location_bonus = 10.0
+                            switched = True
+                    if not switched:
+                        location_blocked = True
+                        location_reason = (
+                            f"Precio en Zona Cara / Premium ({range_pos_pct:.0f}% del rango diario, "
+                            f"techo PDH {_fmt(pdh, digits)}): sin tendencia HTF ni noticias de continuidad, "
+                            "prohibido comprar en el techo."
+                        )
 
     base_score = float((mejor or {}).get("score") or 0.0)
     components = (mejor or {}).get("components") or {}
@@ -431,21 +490,6 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
     in_killzone = bool(killzone.get("in_killzone"))
     killzone_name = killzone.get("name")
 
-    # Unificación de confluencia HTF dentro del gate de aprobación (P1 - Audit #4)
-    htf_bonus = 0.0
-    htf_conf = None
-    if isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
-        try:
-            htf_conf = smc_engine.evaluate_htf_confluence(
-                htf_ctx, direction=direction, current_price=price
-            )
-            htf_bonus = float(htf_conf.get("score_bonus") or 0.0)
-        except Exception:  # noqa: BLE001
-            htf_conf = None
-            htf_bonus = 0.0
-
-    zone = entry_zone(patterns, price, direction, span_limit, fib_ote=fib_ote)
-    elegida = zone.get("zone")
     in_ote = bool(zone.get("in_ote"))
     ote_bonus = 8.0 if in_ote else 0.0
 
@@ -561,6 +605,7 @@ def evaluate_gate(snapshot: Optional[Dict[str, Any]],
         "location_score_bonus": location_bonus,
         "ote_score_bonus": ote_bonus,
         "in_ote": in_ote,
+        "continuity_mode": continuity_mode,
         "dealing_zone": dealing_zone,
         "range_position_pct": round(range_pos_pct, 1) if range_pos_pct is not None else None,
         "htf_confluence": htf_conf,

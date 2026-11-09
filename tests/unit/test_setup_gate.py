@@ -335,6 +335,23 @@ class TestEvaluateGate:
         assert plan["score"] == 68.0
         assert plan["approved"] is True
 
+    def test_continuidad_por_noticias_o_tendencia_htf_permite_entrar_en_retroceso(self):
+        """Si hay noticias/Tribunal o tendencia HTF fuerte + retroceso a OB/FVG, se habilita Continuidad."""
+        snap_sell_cont = _snapshot(direccion="SELL", price=1.1008)
+        snap_sell_cont["pdh"] = 1.1100
+        snap_sell_cont["pdl"] = 1.1000
+        # Respaldo de noticias/Tribunal bajista con 82% de confianza
+        snap_sell_cont["macro_confluence"] = {
+            "bias": "bajista",
+            "confidence": 82,
+            "verdict_status": "RIESGO_REDUCIDO",
+        }
+        plan_cont = setup_gate.evaluate_gate(snap_sell_cont, CFG)
+        assert plan_cont["direction"] == "SELL"
+        assert plan_cont["continuity_mode"] is True
+        assert plan_cont["approved"] is True
+
+
 
 
 

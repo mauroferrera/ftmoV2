@@ -398,13 +398,14 @@ class AutoTraderService:
         pdh: Optional[float] = None,
         pdl: Optional[float] = None,
         inst_confluence: Optional[Dict[str, Any]] = None,
+        continuity_mode: bool = False,
     ) -> Tuple[bool, Optional[str]]:
         """Aplica el Filtro de Confluencia Institucional + Estrategia del Usuario:
         
         1. Ventana de Killzone activa (Londres 07:00-10:00 UTC o NY 12:30-15:30 UTC).
-        2. Regla 1 (Premium vs. Discount): Comprar barato en Discount (<=50%) y Vender caro en Premium (>50%).
-        3. Regla 2 y 4 (Volumen VSA TradingView + Brújula Dólar DXY): Fuerza de volumen / absorción y sin SMT opuesto.
-        4. Consenso Web / Bancario favorable y Tribunal Macro EUR/USD alineado (sin VETO).
+        2. Tribunal Macro y Consenso Web / Bancos (EURUSD) + Matriz HTF (Continuidad vs Giro).
+        3. Regla 1 (Premium vs. Discount + Excepción de Continuidad por Noticias/HTF en Retroceso OB/OTE).
+        4. Regla 2 y 4 (Volumen VSA TradingView + Brújula Dólar DXY): Fuerza de volumen / absorción y sin SMT opuesto.
         5. Mitigación / Toque de la zona (OB/FVG/OTE): no perseguir velas lejanas.
         """
         # 1. Ventana de Killzone
@@ -423,8 +424,46 @@ class AutoTraderService:
             return False, "Fuera de Killzone (requiere Londres 07-10 UTC o NY 12:30-15:30 UTC)"
 
         sym_clean = str(symbol or "").upper().replace("/", "")
+        has_continuity = bool(continuity_mode)
 
-        # 2. Regla 1: Ubicación Premium vs. Discount (Comprar en el piso / Vender en el techo)
+        # 2. Tribunal Macro y Consenso Web / Bancos (EURUSD)
+        if sym_clean == "EURUSD" and self._rt is not None:
+            try:
+                import json
+                from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
+                spot = EurUsdSpotAnalysisService().get_latest()
+                if spot:
+                    payload = json.loads(spot.get("payload_json") or "{}")
+                    trib = payload.get("tribunal") if isinstance(payload, dict) else {}
+                    t_verdict = trib.get("verdict") if isinstance(trib, dict) and isinstance(trib.get("verdict"), dict) else {}
+                    v_status = str(t_verdict.get("status") or "").upper()
+                    if v_status == "VETO":
+                        return False, "VETO del Tribunal Macro EUR/USD (evento o alto riesgo)"
+
+                    b_bull = int(spot.get("consensus_bull") or 0)
+                    b_bear = int(spot.get("consensus_bear") or 0)
+                    b_neut = int(spot.get("consensus_neutral") or 0)
+                    total_sources = b_bull + b_bear + b_neut
+                    if direction == "BUY" and total_sources > 0 and b_bear > b_bull:
+                        return False, f"Consenso Web mayoritariamente bajista ({b_bear} vs {b_bull} bull)"
+                    if direction == "SELL" and total_sources > 0 and b_bull > b_bear:
+                        return False, f"Consenso Web mayoritariamente alcista ({b_bull} vs {b_bear} bear)"
+
+                    macro_bias = str(spot.get("bias") or "").lower()
+                    macro_conf = float(spot.get("confidence") or 0.0)
+                    if direction == "BUY" and macro_bias == "bajista":
+                        return False, "Tribunal Macro con sesgo bajista opuesto a BUY"
+                    if direction == "SELL" and macro_bias == "alcista":
+                        return False, "Tribunal Macro con sesgo alcista opuesto a SELL"
+                    if macro_conf >= 60.0 and (
+                        (direction == "BUY" and macro_bias == "alcista")
+                        or (direction == "SELL" and macro_bias == "bajista")
+                    ):
+                        has_continuity = True
+            except Exception as exc:
+                log.debug("No se pudo evaluar confluencia macro para %s: %s", symbol, exc)
+
+        # 3. Ubicación Premium vs. Discount + Excepción de Continuidad por Tendencia HTF / Noticias
         if (pdh is None or pdl is None) and self._rt is not None:
             market_svc = getattr(self._rt, "market", None)
             if market_svc is not None and hasattr(market_svc, "pattern_data"):
@@ -433,6 +472,12 @@ class AutoTraderService:
                     if isinstance(p_data, dict):
                         pdh = p_data.get("pdh")
                         pdl = p_data.get("pdl")
+                        htf_ctx = (p_data.get("analysis") or {}).get("htf_context")
+                        if not has_continuity and isinstance(htf_ctx, dict) and htf_ctx.get("timeframes"):
+                            from core import smc_engine
+                            hc = smc_engine.evaluate_htf_confluence(htf_ctx, direction=direction, current_price=current_price)
+                            if float(hc.get("score_bonus") or 0.0) >= 4.0:
+                                has_continuity = True
                 except Exception:
                     pass
 
@@ -440,12 +485,12 @@ class AutoTraderService:
             pdh_f, pdl_f, cp_f = float(pdh), float(pdl), float(current_price)
             eq_50 = (pdh_f + pdl_f) / 2.0
             pos_pct = ((cp_f - pdl_f) / (pdh_f - pdl_f)) * 100.0
-            if direction == "SELL" and cp_f <= eq_50:
-                return False, f"Precio en Zona Barata / Discount ({pos_pct:.0f}% del rango diario): prohibido vender en el piso"
-            if direction == "BUY" and cp_f > eq_50:
-                return False, f"Precio en Zona Cara / Premium ({pos_pct:.0f}% del rango diario): prohibido comprar en el techo"
+            if direction == "SELL" and cp_f <= eq_50 and not (has_continuity and planned_entry is not None):
+                return False, f"Precio en Zona Barata / Discount ({pos_pct:.0f}% del rango diario): sin catalizador de continuidad, prohibido vender en el piso"
+            if direction == "BUY" and cp_f > eq_50 and not (has_continuity and planned_entry is not None):
+                return False, f"Precio en Zona Cara / Premium ({pos_pct:.0f}% del rango diario): sin catalizador de continuidad, prohibido comprar en el techo"
 
-        # 3. Regla 2 (Volumen VSA TradingView) + Regla 4 (Brújula Dólar DXY)
+        # 4. Regla 2 (Volumen VSA TradingView) + Regla 4 (Brújula Dólar DXY)
         if inst_confluence is None and self._rt is not None:
             try:
                 from adapters.tradingview.tv_adapter import CME_FUTURES_MAP, TradingViewAdapter
@@ -469,38 +514,7 @@ class AutoTraderService:
             ) and ic_status != "ALTA_CONFLUENCIA_BALLENAS":
                 return False, f"Brújula Dólar (DXY) en contra ({smt_status})"
 
-        # 4. Tribunal Macro y Consenso Web / Bancos (EURUSD)
-        if sym_clean == "EURUSD":
-            try:
-                import json
-                from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
-                spot = EurUsdSpotAnalysisService().get_latest()
-                if spot:
-                    payload = json.loads(spot.get("payload_json") or "{}")
-                    trib = payload.get("tribunal") if isinstance(payload, dict) else {}
-                    t_verdict = trib.get("verdict") if isinstance(trib, dict) and isinstance(trib.get("verdict"), dict) else {}
-                    v_status = str(t_verdict.get("status") or "").upper()
-                    if v_status == "VETO":
-                        return False, "VETO del Tribunal Macro EUR/USD (evento o alto riesgo)"
-
-                    b_bull = int(spot.get("consensus_bull") or 0)
-                    b_bear = int(spot.get("consensus_bear") or 0)
-                    b_neut = int(spot.get("consensus_neutral") or 0)
-                    total_sources = b_bull + b_bear + b_neut
-                    if direction == "BUY" and total_sources > 0 and b_bear > b_bull:
-                        return False, f"Consenso Web mayoritariamente bajista ({b_bear} vs {b_bull} bull)"
-                    if direction == "SELL" and total_sources > 0 and b_bull > b_bear:
-                        return False, f"Consenso Web mayoritariamente alcista ({b_bull} vs {b_bear} bear)"
-
-                    macro_bias = str(spot.get("bias") or "").lower()
-                    if direction == "BUY" and macro_bias == "bajista":
-                        return False, "Tribunal Macro con sesgo bajista opuesto a BUY"
-                    if direction == "SELL" and macro_bias == "alcista":
-                        return False, "Tribunal Macro con sesgo alcista opuesto a SELL"
-            except Exception as exc:
-                log.debug("No se pudo evaluar confluencia macro para %s: %s", symbol, exc)
-
-        # 3. Mitigación / Toque de la zona (no perseguir precio)
+        # 5. Mitigación / Toque de la zona (no perseguir precio)
         if planned_entry is not None and current_price is not None:
             pe = float(planned_entry)
             cp = float(current_price)

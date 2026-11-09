@@ -85,7 +85,44 @@ def evaluate(snapshot: Dict[str, Any],
     YAML es un umbral distinto, y que conste solo en la URL lo esconde del log de
     setups y de la fila de auditoría.
     """
-    snap = snapshot or {}
+    snap = dict(snapshot or {})
+    sym_raw = str(snap.get("symbol") or "").upper().replace("/", "")
+    has_live_ctx = (
+        snap.get("pdh") is not None
+        or snap.get("pdl") is not None
+        or (snap.get("analysis") or {}).get("htf_context") is not None
+    )
+
+    # Pre-cargar Tribunal Macro / Noticias en EURUSD para que el gate conozca si hay Continuidad Macro
+    macro_pre = snap.get("macro_confluence")
+    if macro_pre is None and sym_raw == "EURUSD" and has_live_ctx:
+        try:
+            import json
+            from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
+
+            spot_latest = EurUsdSpotAnalysisService().get_latest()
+            if spot_latest:
+                payload = json.loads(spot_latest.get("payload_json") or "{}")
+                trib = payload.get("tribunal") if isinstance(payload, dict) else {}
+                trib = trib if isinstance(trib, dict) else {}
+                t_verdict = trib.get("verdict") if isinstance(trib.get("verdict"), dict) else {}
+                macro_pre = {
+                    "pair": "EURUSD",
+                    "bias": spot_latest.get("bias"),
+                    "confidence": spot_latest.get("confidence"),
+                    "run_key": spot_latest.get("run_key"),
+                    "run_time": spot_latest.get("run_time"),
+                    "sources_count": spot_latest.get("sources_count", 0),
+                    "verdict_status": t_verdict.get("status") or "NEUTRAL",
+                    "recommended_risk_pct": t_verdict.get("recommended_risk_pct"),
+                    "ruling": t_verdict.get("ruling") or "",
+                    "invalidation_condition": t_verdict.get("invalidation_condition") or "",
+                    "grounding_mode": trib.get("grounding_mode") or "deterministic_fallback",
+                }
+                snap["macro_confluence"] = macro_pre
+        except Exception:
+            macro_pre = None
+
     gate = setup_gate.evaluate_gate(snap, cfg, spec=spec, min_score=min_score)
     if gate is None:
         raise SinSetup("sin scores de risk engine en el snapshot")
@@ -178,6 +215,7 @@ def evaluate(snapshot: Dict[str, Any],
         ret["location_score_bonus"] = gate.get("location_score_bonus", 0.0)
         ret["ote_score_bonus"] = gate.get("ote_score_bonus", 0.0)
         ret["in_ote"] = bool(gate.get("in_ote"))
+        ret["continuity_mode"] = bool(gate.get("continuity_mode"))
         ret["dealing_zone"] = gate.get("dealing_zone")
         ret["range_position_pct"] = gate.get("range_position_pct")
         ret["score_with_htf"] = gate["score"]
@@ -196,48 +234,47 @@ def evaluate(snapshot: Dict[str, Any],
 
     if str(gate.get("symbol") or "").upper() == "EURUSD":
         try:
-            import json
-            from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
+            if isinstance(macro_pre, dict):
+                mc_dict = dict(macro_pre)
+            else:
+                import json
+                from api.services.eurusd_spot_analysis_service import EurUsdSpotAnalysisService
 
-            spot_latest = EurUsdSpotAnalysisService().get_latest()
-            if spot_latest:
-                macro_bias = spot_latest.get("bias")
+                spot_latest = EurUsdSpotAnalysisService().get_latest()
+                mc_dict = None
+                if spot_latest:
+                    payload = json.loads(spot_latest.get("payload_json") or "{}")
+                    trib = payload.get("tribunal") if isinstance(payload, dict) else {}
+                    trib = trib if isinstance(trib, dict) else {}
+                    t_verdict = trib.get("verdict") if isinstance(trib.get("verdict"), dict) else {}
+                    mc_dict = {
+                        "pair": "EURUSD",
+                        "bias": spot_latest.get("bias"),
+                        "confidence": spot_latest.get("confidence"),
+                        "run_key": spot_latest.get("run_key"),
+                        "run_time": spot_latest.get("run_time"),
+                        "sources_count": spot_latest.get("sources_count", 0),
+                        "verdict_status": t_verdict.get("status") or "NEUTRAL",
+                        "recommended_risk_pct": t_verdict.get("recommended_risk_pct"),
+                        "ruling": t_verdict.get("ruling") or "",
+                        "invalidation_condition": t_verdict.get("invalidation_condition") or "",
+                        "grounding_mode": trib.get("grounding_mode") or "deterministic_fallback",
+                    }
+            if mc_dict:
+                macro_bias = mc_dict.get("bias")
                 is_aligned = None
                 if macro_bias == "alcista":
                     is_aligned = (direction == "BUY")
                 elif macro_bias == "bajista":
                     is_aligned = (direction == "SELL")
-
-                payload = json.loads(spot_latest.get("payload_json") or "{}")
-                trib = payload.get("tribunal") if isinstance(payload, dict) else {}
-                trib = trib if isinstance(trib, dict) else {}
-                t_verdict = trib.get("verdict") if isinstance(trib.get("verdict"), dict) else {}
-
-                ret["macro_confluence"] = {
-                    "pair": "EURUSD",
-                    "bias": macro_bias,
-                    "confidence": spot_latest.get("confidence"),
-                    "aligned": is_aligned,
-                    "run_key": spot_latest.get("run_key"),
-                    "run_time": spot_latest.get("run_time"),
-                    "sources_count": spot_latest.get("sources_count", 0),
-                    "verdict_status": t_verdict.get("status") or "NEUTRAL",
-                    "recommended_risk_pct": t_verdict.get("recommended_risk_pct"),
-                    "ruling": t_verdict.get("ruling") or "",
-                    "invalidation_condition": t_verdict.get("invalidation_condition") or "",
-                    "grounding_mode": trib.get("grounding_mode") or "deterministic_fallback",
-                }
+                mc_dict["aligned"] = is_aligned
+                ret["macro_confluence"] = mc_dict
         except Exception:
             pass
 
     # Confluencia institucional de volumen de Futuros CME y DXY (TradingView)
     sym_clean = str(gate.get("symbol") or "").upper().replace("/", "")
     inst_conf = snap.get("institutional_confluence")
-    has_live_ctx = (
-        snap.get("pdh") is not None
-        or snap.get("pdl") is not None
-        or (snap.get("analysis") or {}).get("htf_context") is not None
-    )
     if inst_conf is None and direction in ("BUY", "SELL") and has_live_ctx:
         try:
             from adapters.tradingview.tv_adapter import CME_FUTURES_MAP, TradingViewAdapter
@@ -258,15 +295,13 @@ def evaluate(snapshot: Dict[str, Any],
         ic_abs = inst_conf.get("absorption")
         smt_status = str(inst_conf.get("smt_status") or "")
 
-        # Regla 2 (Volumen VSA TradingView) + Regla 4 (Brújula Dólar DXY)
-        if ic_status in ("BAJO_VOLUMEN_CME", "BAJO_VOLUMEN_SPOT"):
-            ret["approved"] = False
-            ret["verdict"] = "ESPERANDO_VOLUMEN"
-            ret["reasons"] = [
-                f"Volumen débil en TradingView ({ic_ratio}x): tu estrategia exige fuerza de volumen o absorción para entrar.",
-                *ret["reasons"],
-            ]
-        elif ic_status == "ALERTA_CONTRA_BALLENAS":
+        # Bonus por Absorción / Pico de Ballenas a favor en TradingView (+8 pts)
+        if ic_status in ("ALTA_CONFLUENCIA_BALLENAS", "BALLENAS_ACTIVAS"):
+            ret["score"] = round(min(100.0, float(ret["score"] or 0.0) + 8.0), 1)
+            ret["score_with_htf"] = ret["score"]
+
+        # Sinergia VSA TradingView + Brújula Dólar DXY (diferenciando Entrada a Mercado vs Orden Límite en OB/OTE)
+        if ic_status == "ALERTA_CONTRA_BALLENAS":
             ret["approved"] = False
             ret["verdict"] = "CONTRA_BALLENAS"
             ret["reasons"] = [
@@ -283,6 +318,19 @@ def evaluate(snapshot: Dict[str, Any],
                 f"Brújula Dólar (DXY) en contra ({smt_status}): divergencia SMT opuesta a {direction}.",
                 *ret["reasons"],
             ]
+        elif ic_status in ("BAJO_VOLUMEN_CME", "BAJO_VOLUMEN_SPOT"):
+            if not is_limit_order:
+                ret["approved"] = False
+                ret["verdict"] = "ESPERANDO_VOLUMEN"
+                ret["reasons"] = [
+                    f"Volumen débil en TradingView ({ic_ratio}x): para entrar a mercado se exige fuerza de volumen o absorción.",
+                    *ret["reasons"],
+                ]
+            elif ret["approved"]:
+                ret["reasons"] = [
+                    f"Plan {order_type} en zona OB/OTE listo: esperando retroceso al nivel con confirmación de volumen ({ic_ratio}x actual).",
+                    *ret["reasons"],
+                ]
 
         if not ret["approved"]:
             ret["echarts"] = {"markLine": [], "markPoint": []}
