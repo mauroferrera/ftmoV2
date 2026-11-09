@@ -1702,6 +1702,45 @@
       transform: translateY(-1px);
     }
 
+    .plan40m-sym-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      cursor: pointer;
+      padding: 0.18rem 0.52rem;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      color: var(--text-main);
+      font-size: 0.92rem;
+      font-weight: 700;
+      font-family: inherit;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      user-select: none;
+    }
+
+    .plan40m-sym-btn:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: rgba(56, 189, 248, 0.7);
+      color: #38bdf8;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(56, 189, 248, 0.25);
+    }
+
+    .plan40m-sym-btn:active {
+      transform: translateY(0);
+    }
+
+    .plan40m-sym-icon {
+      font-size: 0.75rem;
+      opacity: 0.75;
+      transition: opacity 0.18s;
+    }
+
+    .plan40m-sym-btn:hover .plan40m-sym-icon {
+      opacity: 1;
+    }
+
     .pnl-pos {
       font-weight: 700;
     }
@@ -5478,6 +5517,24 @@
       }
     }
 
+    // Navegar directamente al gráfico de un par desde el modal del plan 40m
+    function openSymbolChartFromPlan(sym) {
+      if (!sym) return;
+      const cleanSym = String(sym).toUpperCase().replace('/', '').trim();
+      closeEurusdModal();
+
+      // Si el símbolo no está en la pestaña activa de focus, cambiar a 'all' para que se vea seleccionado
+      if (state.activeTab === 'focus' && state.focusSymbols && !state.focusSymbols.includes(cleanSym)) {
+        state.activeTab = 'all';
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+          if (btn.dataset.tab === 'all') btn.classList.add('active');
+          else if (btn.dataset.tab === 'focus') btn.classList.remove('active');
+        });
+      }
+
+      selectSymbol(cleanSym, true);
+    }
+
     function renderSymbolsList() {
       const listEl = $('symbols-list');
       listEl.innerHTML = '';
@@ -6345,7 +6402,9 @@
               return `
                 <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:5px; padding:0.4rem 0.6rem; display:flex; justify-content:space-between; align-items:center;">
                   <div>
-                    <strong style="color:var(--text-main); font-size:0.82rem;">#${p.ticket} ${p.symbol}</strong>
+                    <button type="button" class="plan40m-sym-btn" onclick="openSymbolChartFromPlan('${p.symbol}')" title="Ver gráfico de ${p.symbol}" style="font-size:0.78rem; padding:0.12rem 0.4rem;">
+                      <b>#${p.ticket} ${p.symbol}</b> <span class="plan40m-sym-icon">📈</span>
+                    </button>
                     <span style="font-size:0.75rem; color:${p.direction==='BUY'?'var(--bull)':'var(--bear)'}; font-weight:700; margin-left:0.3rem;">${p.direction}</span>
                     <span style="font-size:0.72rem; color:var(--text-dim); margin-left:0.3rem;">${p.volume} lotes @ ${p.price_open}</span>
                   </div>
@@ -6364,7 +6423,9 @@
               return `
                 <div style="background:rgba(56,189,248,0.05); border:1px solid rgba(56,189,248,0.25); border-radius:5px; padding:0.4rem 0.6rem; display:flex; justify-content:space-between; align-items:center;">
                   <div>
-                    <strong style="color:var(--text-main); font-size:0.82rem;">#${o.ticket} ${o.symbol}</strong>
+                    <button type="button" class="plan40m-sym-btn" onclick="openSymbolChartFromPlan('${o.symbol}')" title="Ver gráfico de ${o.symbol}" style="font-size:0.78rem; padding:0.12rem 0.4rem;">
+                      <b>#${o.ticket} ${o.symbol}</b> <span class="plan40m-sym-icon">📈</span>
+                    </button>
                     <span style="font-size:0.75rem; color:${isBuy?'var(--bull)':'var(--bear)'}; font-weight:700; margin-left:0.3rem;">⏳ ${typeStr}</span>
                     <span style="font-size:0.72rem; color:var(--accent, #38bdf8); margin-left:0.3rem;">${o.volume} lotes @ ${o.price_open} (Límite)</span>
                   </div>
@@ -6437,7 +6498,13 @@
                 <div class="bank-card" style="padding:0.8rem 0.95rem; border-radius:6px; border:1px solid rgba(255,255,255,0.08); background:rgba(15,23,42,0.65);">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
                     <div style="display:flex; align-items:center; gap:0.4rem;">
-                      <strong style="font-size:0.92rem; color:var(--text-main);">${p.symbol}</strong>
+                      <button type="button" 
+                              class="plan40m-sym-btn" 
+                              onclick="openSymbolChartFromPlan('${p.symbol}')" 
+                              title="Ver gráfico en tiempo real de ${p.symbol}">
+                        <span>${p.symbol}</span>
+                        <span class="plan40m-sym-icon">📈</span>
+                      </button>
                       ${manualTag}
                     </div>
                     <span class="${mandateBadge}" style="font-size:0.7rem; font-weight:700;">${mandateIcon} ${p.mandate}</span>
