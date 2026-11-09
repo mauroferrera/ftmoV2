@@ -94,6 +94,8 @@ def create_app(runtime: Optional[Runtime] = None) -> FastAPI:
     try:
         from api.routes import analysis as _analysis
         app.include_router(_analysis.router)
+        if hasattr(_analysis, "router_plan"):
+            app.include_router(_analysis.router_plan)
     except Exception:
         pass
 

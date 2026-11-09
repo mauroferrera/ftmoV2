@@ -12,6 +12,7 @@ from core.daily_guide import compute_daily_guide
 from core.eurusd_spot_analysis_schema import count_consensus
 
 router = APIRouter(prefix="/api/analysis/eurusd-spot", tags=["analysis-eurusd-spot"])
+router_plan = APIRouter(prefix="/api/analysis", tags=["trading-plan-40m"])
 svc = EurUsdSpotAnalysisService()
 
 
@@ -169,3 +170,44 @@ def run_manual(
         return report
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"error al generar análisis: {exc}")
+
+
+@router.get("/plan-40m")
+@router_plan.get("/plan-40m")
+def get_plan_40m(request: Request) -> Dict[str, Any]:
+    """Retorna el Plan de Trading para los próximos 40 minutos y el estado del Vigilante."""
+    rt = getattr(request.app.state, "runtime", None) if hasattr(request, "app") else None
+    plan_svc = getattr(rt, "plan_service", None) if rt else None
+
+    if plan_svc is not None and hasattr(plan_svc, "get_plan_with_vigilante_status"):
+        return plan_svc.get_plan_with_vigilante_status()
+
+    # Fallback si el runtime no tiene plan_service inicializado aún
+    from api.services.plan_40m_service import Plan40mService
+    fallback_svc = Plan40mService(runtime=rt)
+    return fallback_svc.get_plan_with_vigilante_status()
+
+
+@router.post("/plan-40m/trigger")
+@router_plan.post("/plan-40m/trigger")
+def trigger_plan_40m(request: Request) -> Dict[str, Any]:
+    """Fuerza una re-deliberación inmediata del Plan de Trading 40 Minutos."""
+    rt = getattr(request.app.state, "runtime", None) if hasattr(request, "app") else None
+    plan_svc = getattr(rt, "plan_service", None) if rt else None
+
+    if plan_svc is None:
+        from api.services.plan_40m_service import Plan40mService
+        plan_svc = Plan40mService(runtime=rt)
+
+    try:
+        new_plan = plan_svc.deliberate_and_create_plan(force=True, reason="TRIGGER_MANUAL_USUARIO")
+        return {
+            "status": "ok",
+            "message": "Plan 40 Min deliberado exitosamente",
+            "plan_id": new_plan.get("plan_id"),
+            "valid_to_utc": new_plan.get("valid_to_utc"),
+            "duration_minutes": new_plan.get("duration_minutes"),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error al deliberar Plan 40m: {exc}")
+

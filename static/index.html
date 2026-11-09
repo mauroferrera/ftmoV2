@@ -2344,6 +2344,7 @@
         <div style="display:flex; align-items:center; gap:0.8rem;">
           <button class="btn btn-primary" id="btn-run-eurusd-analysis" type="button" onclick="triggerRunEurusdAnalysis()" style="font-size:0.75rem; padding:0.35rem 0.65rem; border-radius:4px; background:var(--accent, #3b82f6); color:#fff; border:none; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:0.3rem;" title="Ejecutar Tribunal en vivo (MT5 + RSS + Google Search + Gemini)">⚡ Generar Ahora</button>
           <div class="eurusd-modal-tabs">
+            <button class="eurusd-tab-btn" data-tab="plan-40m" type="button">📋 Plan 40 Min</button>
             <button class="eurusd-tab-btn active" data-tab="daily-guide" type="button">🎯 Guía del Día</button>
             <button class="eurusd-tab-btn" data-tab="latest" type="button">Último Análisis</button>
             <button class="eurusd-tab-btn" data-tab="history" type="button">Historial (Runs)</button>
@@ -2354,6 +2355,87 @@
       </div>
 
       <div class="eurusd-modal-body">
+        <!-- Tab: Plan de Trading 40 Minutos y Vigilante Multi-Moneda -->
+        <div id="eurusd-tab-plan-40m" style="display:none; flex-direction:column; gap:1rem;">
+          <!-- Card de Cabecera: Estado del Plan 40m y Próxima Deliberación -->
+          <div class="tribunal-banner" style="background:rgba(15,23,42,0.9); border-left:4px solid var(--accent, #3b82f6); padding:0.95rem 1.15rem; border-radius:6px; border:1px solid rgba(59,130,246,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem;">
+              <div style="display:flex; align-items:center; gap:0.6rem;">
+                <span style="font-size:1.3rem;">📋</span>
+                <div>
+                  <strong style="font-size:0.95rem; color:var(--text-main);" id="plan40m-title">Plan de Trading Activo (Próximos 40 Minutos)</strong>
+                  <div style="font-size:0.75rem; color:var(--text-dim);" id="plan40m-validity">Cargando plan de trading...</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:0.6rem;">
+                <span class="eurusd-badge" id="plan40m-badge-status" style="font-size:0.78rem;">🟢 VIGENTE</span>
+                <button class="btn btn-primary" id="btn-force-plan40m" type="button" onclick="triggerForcePlan40m()" style="font-size:0.75rem; padding:0.35rem 0.65rem; border-radius:4px; background:var(--accent, #3b82f6); color:#fff; border:none; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:0.3rem;" title="Forzar re-deliberación del Comité ahora">⚡ Re-deliberar Ahora</button>
+              </div>
+            </div>
+            <div style="margin-top:0.6rem; padding-top:0.6rem; border-top:1px solid rgba(255,255,255,0.07); display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; font-size:0.78rem;">
+              <div>
+                <span style="color:var(--text-muted);">Próxima Deliberación: </span>
+                <strong style="color:var(--text-main);" id="plan40m-next-run">—</strong>
+              </div>
+              <div>
+                <span style="color:var(--text-muted);">Disparador / Causa: </span>
+                <span style="color:var(--warn);" id="plan40m-trigger-reason">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card del Vigilante en Tiempo Real (AutoTrader 30s) -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">🛡️ Vigilante en Tiempo Real (Precios y Operaciones Abiertas)</span>
+              <span class="eurusd-badge" id="plan40m-vigilante-badge">Ciclo cada 30s</span>
+            </div>
+            <div class="eurusd-section-body" style="padding:0.85rem 1rem; background:rgba(7,10,16,0.5); border-radius:7px; border:1px solid var(--border);">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.6rem;">
+                <div style="font-size:0.82rem; color:var(--text-main);" id="plan40m-vigilante-msg">
+                  El vigilante monitorea precios cada 30s, vigila el gatillo de volumen en TradingView y aplica Break-Even inteligente ante agotamiento de volumen o 50% Equilibrium.
+                </div>
+              </div>
+              <!-- Mini-tabla de Posiciones Monitoreadas -->
+              <div id="plan40m-open-positions-container" style="margin-top:0.5rem;">
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem; font-weight:600;">Posiciones Abiertas Monitoreadas:</div>
+                <div id="plan40m-open-positions-list" style="display:flex; flex-direction:column; gap:0.4rem;">
+                  <div style="font-size:0.78rem; color:var(--text-dim);">Sin operaciones abiertas actualmente. Vigilante en espera de zonas aprobadas.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Radar de Próximas Noticias Agendadas -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">📡 Radar de Noticias Macro Agendadas (Todas las Monedas)</span>
+              <span class="eurusd-badge" id="plan40m-news-badge">0 eventos</span>
+            </div>
+            <div class="eurusd-section-body" style="padding:0.75rem 0.9rem;">
+              <div style="font-size:0.75rem; color:var(--text-dim); margin-bottom:0.5rem;">
+                El sistema re-delibera automáticamente en el instante exacto de cada noticia de impacto para no operar a ciegas.
+              </div>
+              <div id="plan40m-news-list" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:0.5rem;">
+                <div style="font-size:0.78rem; color:var(--text-dim);">Sin noticias inmediatas en el radar. Deliberación en ciclo regular de 40 min.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Parrilla de Mandatos de Trading por Par (Multi-Moneda) -->
+          <div class="eurusd-section">
+            <div class="eurusd-section-header">
+              <span class="eurusd-section-title">🗺️ Mandatos del Plan para los Próximos 40 Minutos (Por Par)</span>
+              <span class="eurusd-badge bull">Reglas Premium/Discount + OTE + VSA</span>
+            </div>
+            <div class="eurusd-section-body" style="padding:0.75rem 0.9rem;">
+              <div id="plan40m-pairs-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:0.75rem;">
+                <!-- Cards dinámicas por par generadas en JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tab: Guía del Día (Copiloto de Decisión) -->
         <div id="eurusd-tab-daily-guide" style="display:flex; flex-direction:column; gap:1rem;">
           <!-- Card de Semáforo y Veredicto Ejecutivo -->
@@ -6060,16 +6142,19 @@
       if (modal) {
         modal.classList.add('open');
         document.querySelectorAll('.eurusd-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'daily-guide'));
+        const tabPlan = document.getElementById('eurusd-tab-plan-40m');
         const tabGuide = document.getElementById('eurusd-tab-daily-guide');
         const tabLatest = document.getElementById('eurusd-tab-latest');
         const tabHistory = document.getElementById('eurusd-tab-history');
         const tabAudit = document.getElementById('eurusd-tab-audit');
+        if (tabPlan) tabPlan.style.display = 'none';
         if (tabGuide) tabGuide.style.display = 'flex';
         if (tabLatest) tabLatest.style.display = 'none';
         if (tabHistory) tabHistory.style.display = 'none';
         if (tabAudit) tabAudit.style.display = 'none';
         loadEurusdLatest();
         loadEurusdHistory();
+        loadPlan40m();
       }
     }
 
@@ -6086,18 +6171,209 @@
         document.querySelectorAll('.eurusd-tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const tab = btn.dataset.tab;
+        const tabPlan = document.getElementById('eurusd-tab-plan-40m');
         const tabGuide = document.getElementById('eurusd-tab-daily-guide');
         const tabLatest = document.getElementById('eurusd-tab-latest');
         const tabHistory = document.getElementById('eurusd-tab-history');
         const tabAudit = document.getElementById('eurusd-tab-audit');
+        if (tabPlan) tabPlan.style.display = tab === 'plan-40m' ? 'flex' : 'none';
         if (tabGuide) tabGuide.style.display = tab === 'daily-guide' ? 'flex' : 'none';
         if (tabLatest) tabLatest.style.display = tab === 'latest' ? 'flex' : 'none';
         if (tabHistory) tabHistory.style.display = tab === 'history' ? 'flex' : 'none';
         if (tabAudit) tabAudit.style.display = tab === 'audit' ? 'flex' : 'none';
+        if (tab === 'plan-40m') loadPlan40m();
         if (tab === 'history') loadEurusdHistory();
         if (tab === 'audit') loadEurusdAudit();
       });
     });
+
+    async function triggerForcePlan40m() {
+      const btn = document.getElementById('btn-force-plan40m');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Deliberando...';
+      }
+      try {
+        const res = await fetch('/api/analysis/eurusd-spot/plan-40m/trigger', { method: 'POST' });
+        if (res.ok) {
+          await loadPlan40m();
+        } else {
+          alert('No se pudo forzar la deliberación.');
+        }
+      } catch (err) {
+        console.error('Error forzando deliberación:', err);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '⚡ Re-deliberar Ahora';
+        }
+      }
+    }
+
+    async function loadPlan40m() {
+      try {
+        const res = await fetch('/api/analysis/eurusd-spot/plan-40m');
+        if (!res.ok) return;
+        const data = await res.json();
+        const plan = data.plan || {};
+        const vig = data.vigilante || {};
+
+        // 1. Cabecera y vigencia
+        const pTitle = document.getElementById('plan40m-title');
+        const pVal = document.getElementById('plan40m-validity');
+        const pBadge = document.getElementById('plan40m-badge-status');
+        const pNext = document.getElementById('plan40m-next-run');
+        const pReason = document.getElementById('plan40m-trigger-reason');
+
+        if (pTitle) pTitle.textContent = `Plan de Trading Activo (Próximos 40 Minutos) · ${plan.plan_id || 'PLAN'}`;
+        if (pVal) {
+          const mins = data.minutes_remaining !== undefined ? data.minutes_remaining : 40;
+          const fromT = plan.valid_from_utc ? plan.valid_from_utc.slice(11, 16) + ' UTC' : '—';
+          const toT = plan.valid_to_utc ? plan.valid_to_utc.slice(11, 16) + ' UTC' : '—';
+          pVal.textContent = `Válido de ${fromT} a ${toT} (${mins} min restantes) · Creado por: ${plan.reason || 'Ciclo 40 min'}`;
+        }
+        if (pBadge) {
+          if (data.is_active) {
+            pBadge.className = 'eurusd-badge bull';
+            pBadge.textContent = `🟢 VIGENTE (${data.minutes_remaining}m)`;
+          } else {
+            pBadge.className = 'eurusd-badge warn';
+            pBadge.textContent = '⏳ EXPIRADO / EN RE-DELIBERACIÓN';
+          }
+        }
+        if (pNext) {
+          const nxt = plan.next_run_utc ? plan.next_run_utc.slice(11, 16) + ' UTC' : 'En 40 min';
+          pNext.textContent = nxt;
+        }
+        if (pReason) {
+          pReason.textContent = plan.next_trigger_label || 'Ciclo regular de 40 min';
+        }
+
+        // 2. Vigilante y Posiciones Abiertas
+        const vigBadge = document.getElementById('plan40m-vigilante-badge');
+        const vigList = document.getElementById('plan40m-open-positions-list');
+        if (vigBadge) {
+          vigBadge.className = vig.autotrader_enabled ? 'eurusd-badge bull' : 'eurusd-badge warn';
+          vigBadge.textContent = vig.autotrader_enabled ? '🟢 Vigilando cada 30s' : '⏸️ En pausa manual';
+        }
+        if (vigList) {
+          const ops = vig.open_positions || [];
+          if (!ops.length) {
+            vigList.innerHTML = '<div style="font-size:0.78rem; color:var(--text-dim);">Sin operaciones abiertas actualmente. Vigilante en espera del precio en zonas del plan.</div>';
+          } else {
+            vigList.innerHTML = ops.map(p => {
+              const profitClass = (p.profit || 0) >= 0 ? 'color:var(--bull);' : 'color:var(--bear);';
+              const beBadge = p.be_applied ? '<span class="eurusd-badge bull" style="font-size:0.68rem;">🛡️ Break-Even Blindado</span>' : '';
+              const rBadge = p.r_actual ? `<span class="eurusd-badge" style="font-size:0.68rem;">R: +${Number(p.r_actual).toFixed(2)}R</span>` : '';
+              return `
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:5px; padding:0.4rem 0.6rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <strong style="color:var(--text-main); font-size:0.82rem;">#${p.ticket} ${p.symbol}</strong>
+                    <span style="font-size:0.75rem; color:${p.direction==='BUY'?'var(--bull)':'var(--bear)'}; font-weight:700; margin-left:0.3rem;">${p.direction}</span>
+                    <span style="font-size:0.72rem; color:var(--text-dim); margin-left:0.3rem;">${p.volume} lotes @ ${p.price_open}</span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:0.4rem;">
+                    ${beBadge}
+                    ${rBadge}
+                    <span style="font-weight:700; font-size:0.82rem; ${profitClass}">$${Number(p.profit||0).toFixed(2)} USD</span>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+
+        // 3. Radar de Noticias Agendadas
+        const newsBadge = document.getElementById('plan40m-news-badge');
+        const newsList = document.getElementById('plan40m-news-list');
+        const schNews = plan.scheduled_news || [];
+        if (newsBadge) newsBadge.textContent = `${schNews.length} eventos en radar`;
+        if (newsList) {
+          if (!schNews.length) {
+            newsList.innerHTML = '<div style="font-size:0.78rem; color:var(--text-dim);">Sin noticias inmediatas de alto/medio impacto. Deliberación en ciclo de 40 min.</div>';
+          } else {
+            newsList.innerHTML = schNews.map(n => {
+              const impClass = n.impact === 'High' ? 'bear' : 'warn';
+              const mins = n.minutes_to_event !== undefined ? `(en ${n.minutes_to_event}m)` : '';
+              return `
+                <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:5px; padding:0.45rem 0.6rem;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.2rem;">
+                    <span style="font-weight:700; color:var(--text-main); font-size:0.78rem;">[${n.currency}] ${n.time_utc}</span>
+                    <span class="eurusd-badge ${impClass}" style="font-size:0.65rem;">${n.impact}</span>
+                  </div>
+                  <div style="font-size:0.75rem; color:var(--text-dim); line-height:1.3;">${n.title} ${mins}</div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+
+        // 4. Parrilla de Mandatos por Par
+        const pairsGrid = document.getElementById('plan40m-pairs-grid');
+        const pairs = plan.pairs || {};
+        const pKeys = Object.keys(pairs);
+        if (pairsGrid) {
+          if (!pKeys.length) {
+            pairsGrid.innerHTML = '<div style="font-size:0.78rem; color:var(--text-dim);">Sin datos de pares disponibles.</div>';
+          } else {
+            pairsGrid.innerHTML = pKeys.map(k => {
+              const p = pairs[k];
+              let mandateBadge = 'eurusd-badge';
+              let mandateIcon = '⏸️';
+              if (p.mandate === 'COMPRA_EN_DISCOUNT') {
+                mandateBadge = 'eurusd-badge bull';
+                mandateIcon = '🟢';
+              } else if (p.mandate === 'VENTA_EN_PREMIUM') {
+                mandateBadge = 'eurusd-badge bear';
+                mandateIcon = '🔴';
+              } else if (p.mandate === 'PAUSA_POR_NOTICIAS') {
+                mandateBadge = 'eurusd-badge warn';
+                mandateIcon = '⚠️';
+              }
+              const manualTag = p.is_manual_only ? '<span class="eurusd-badge" style="font-size:0.65rem; background:rgba(234,179,8,0.15); color:#eab308; border-color:#eab308;">Manual</span>' : '';
+              const locColor = p.location_pct <= 35 ? 'var(--bull)' : (p.location_pct >= 65 ? 'var(--bear)' : 'var(--text-dim)');
+              const entryTxt = p.entry_zone ? `${p.entry_zone[0]} – ${p.entry_zone[1]}` : 'Esperar zona / Sin entrada centro';
+              const slTxt = p.sl_suggested ? `${p.sl_suggested}` : '—';
+              const tpTxt = p.tp_suggested ? `${p.tp_suggested}` : '—';
+
+              return `
+                <div class="bank-card" style="padding:0.8rem 0.95rem; border-radius:6px; border:1px solid rgba(255,255,255,0.08); background:rgba(15,23,42,0.65);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                      <strong style="font-size:0.92rem; color:var(--text-main);">${p.symbol}</strong>
+                      ${manualTag}
+                    </div>
+                    <span class="${mandateBadge}" style="font-size:0.7rem; font-weight:700;">${mandateIcon} ${p.mandate}</span>
+                  </div>
+
+                  <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.76rem; margin-bottom:0.4rem;">
+                    <div>Precio: <strong style="color:var(--text-main);">${p.current_price}</strong></div>
+                    <div>Ubicación: <strong style="color:${locColor};">${p.location_pct}%</strong> (PDL-PDH)</div>
+                  </div>
+
+                  <div style="background:rgba(0,0,0,0.25); border-radius:4px; padding:0.4rem 0.5rem; font-size:0.73rem; margin-bottom:0.45rem;">
+                    <div style="color:var(--text-dim); margin-bottom:0.15rem;">🎯 Zona Entrada: <span style="color:var(--text-main); font-weight:600;">${entryTxt}</span></div>
+                    <div style="display:flex; justify-content:space-between; color:var(--text-dim);">
+                      <span>SL: <strong style="color:var(--warn);">${slTxt}</strong></span>
+                      <span>TP (50% Eq): <strong style="color:var(--bull);">${tpTxt}</strong></span>
+                    </div>
+                  </div>
+
+                  <div style="font-size:0.72rem; color:var(--accent, #38bdf8); margin-bottom:0.25rem;">
+                    <strong>Gatillo:</strong> ${p.trigger_condition || 'Toque de zona + Volumen TradingView'}
+                  </div>
+                  <div style="font-size:0.7rem; color:var(--text-dim); line-height:1.35;">
+                    ${p.rationale || ''}
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+      } catch (err) {
+        console.error('Error cargando plan 40m:', err);
+      }
+    }
 
     async function loadEurusdAudit() {
       const tbody = $('audit-table-body');

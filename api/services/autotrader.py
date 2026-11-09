@@ -463,6 +463,21 @@ class AutoTraderService:
             except Exception as exc:
                 log.debug("No se pudo evaluar confluencia macro para %s: %s", symbol, exc)
 
+        # 2b. Mandato del Plan de Trading 40 Minutos (Comité Multi-Moneda)
+        plan_svc = getattr(self._rt, "plan_service", None) if self._rt else None
+        if plan_svc is not None and hasattr(plan_svc, "get_current_plan"):
+            c_plan = plan_svc.get_current_plan()
+            if c_plan and isinstance(c_plan.get("pairs"), dict):
+                p_sym = c_plan["pairs"].get(sym_clean)
+                if p_sym:
+                    mandate = str(p_sym.get("mandate") or "")
+                    if mandate == "PAUSA_POR_NOTICIAS":
+                        return False, f"Plan 40 Min: Pausa preventiva por noticia inminente en {sym_clean}"
+                    if direction == "BUY" and mandate in ("VENTA_EN_PREMIUM", "CONTINUIDAD_BAJISTA", "SOLO_VENTAS"):
+                        return False, f"Plan 40 Min prohíbe compras (mandato del Comité: {mandate})"
+                    if direction == "SELL" and mandate in ("COMPRA_EN_DISCOUNT", "CONTINUIDAD_ALCISTA", "SOLO_COMPRAS"):
+                        return False, f"Plan 40 Min prohíbe ventas (mandato del Comité: {mandate})"
+
         # 3. Ubicación Premium vs. Discount + Excepción de Continuidad por Tendencia HTF / Noticias
         if (pdh is None or pdl is None) and self._rt is not None:
             market_svc = getattr(self._rt, "market", None)

@@ -276,23 +276,28 @@ def parse_rss_xml(
     return results
 
 
+ALL_MAJOR_CURRENCIES: Tuple[str, ...] = ("USD", "EUR", "GBP", "CAD", "CHF", "JPY", "AUD", "NZD")
+
 def parse_calendar_json(
     items: Any,
     now_utc: Optional[datetime] = None,
+    allowed_currencies: Optional[Tuple[str, ...] | List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Filtra eventos macroeconómicos EUR y USD de impacto High/Medium en ventana [-6h, +24h]."""
+    """Filtra eventos macroeconómicos de impacto High/Medium en ventana [-6h, +24h]."""
     if not isinstance(items, list):
         return []
     now = now_utc or datetime.now(timezone.utc)
     start_win = now - timedelta(hours=6)
     end_win = now + timedelta(hours=24)
 
+    target_currencies = set(c.upper() for c in (allowed_currencies if allowed_currencies is not None else ("USD", "EUR")))
+
     events: List[Dict[str, Any]] = []
     for raw in items:
         if not isinstance(raw, dict):
             continue
         country = str(raw.get("country") or "").strip().upper()
-        if country not in ("USD", "EUR"):
+        if country not in target_currencies:
             continue
         impact = str(raw.get("impact") or "").strip()
         if impact not in ("High", "Medium"):

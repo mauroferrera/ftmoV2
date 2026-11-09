@@ -39,7 +39,7 @@ class Runtime:
     """
 
     __slots__ = ("store", "market", "prop", "watcher", "execution", "account_id",
-                 "autotrader", "_store_backend", "reconciliation")
+                 "autotrader", "_store_backend", "reconciliation", "plan_service")
 
     def __init__(
         self,
@@ -52,6 +52,7 @@ class Runtime:
         account_id: Optional[str] = None,
         autotrader: Optional[Any] = None,
         reconciliation: Optional[Any] = None,
+        plan_service: Optional[Any] = None,
     ) -> None:
         self.store = store
         self.market = market
@@ -61,6 +62,7 @@ class Runtime:
         self.account_id = account_id
         self.autotrader = autotrader
         self.reconciliation = reconciliation
+        self.plan_service = plan_service
         self._store_backend = "inyectado" if store is not None else None
 
     @classmethod
@@ -94,6 +96,7 @@ class Runtime:
         rt.execution = cls._build_execution(account_id=account_id)
         rt.reconciliation = cls._build_reconciliation(rt.market, rt.store, rt.execution)
         rt.autotrader = cls._build_autotrader(rt, account_id=account_id)
+        rt.plan_service = cls._build_plan_service(rt)
         return rt
 
     @staticmethod
@@ -184,6 +187,17 @@ class Runtime:
             log.warning("reconciliación no disponible: %s", exc)
             return None
 
+    @staticmethod
+    def _build_plan_service(rt: Any) -> Optional[Any]:
+        """El servicio de Plan de Trading 40 Minutos y Comité Multi-Moneda."""
+        try:
+            from api.services.plan_40m_service import Plan40mService
+
+            return Plan40mService(runtime=rt)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("plan_service no disponible: %s", exc)
+            return None
+
     # -- ciclo de vida -----------------------------------------------------------
 
     async def startup(self) -> None:
@@ -201,6 +215,12 @@ class Runtime:
                 self._store_backend = "error"
                 log.warning("base de datos no disponible: %s", exc)
         log.info("runtime listo: store=%s", self._store_backend)
+        if hasattr(self, "plan_service") and self.plan_service is not None:
+            try:
+                log.info("Iniciando Plan de Trading 40 Minutos y escaneo de arranque...")
+                await self.plan_service.start()
+            except Exception as exc:
+                log.warning("no se pudo iniciar plan_service en startup: %s", exc)
         if hasattr(self, "autotrader") and self.autotrader is not None:
             try:
                 if self.autotrader.should_autostart():
@@ -211,6 +231,11 @@ class Runtime:
 
     async def shutdown(self) -> None:
         """Apaga lo que se encendió. Idempotente."""
+        if hasattr(self, "plan_service") and self.plan_service is not None:
+            try:
+                await self.plan_service.stop()
+            except Exception:
+                pass
         if hasattr(self, "autotrader") and self.autotrader is not None:
             try:
                 await self.autotrader.stop(persist=False)
