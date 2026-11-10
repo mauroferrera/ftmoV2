@@ -1529,31 +1529,44 @@
     /* Execution Trade Controls */
     .trade-form-grid {
       display: grid;
-      grid-template-columns: 0.9fr 1fr 1fr;
-      gap: 0.45rem;
-      margin-bottom: 0.55rem;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.35rem;
+      margin-bottom: 0.4rem;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .trade-input-group {
+      min-width: 0;
+      overflow: hidden;
     }
 
     .trade-input-group label {
-      display: block;
-      font-size: 0.66rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.65rem;
       color: var(--text-dim);
       margin-bottom: 0.2rem;
       font-weight: 600;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .trade-input {
       width: 100%;
+      box-sizing: border-box;
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 6px;
-      padding: 0.35rem 0.45rem;
+      padding: 0.35rem 0.35rem;
       color: var(--text-main);
       font-family: var(--font-mono);
       font-size: 0.8rem;
       font-weight: 600;
       outline: none;
+      min-width: 0;
     }
 
     .trade-input:focus {
@@ -2231,31 +2244,37 @@
           </div>
 
           <!-- Formulario de Operativa Manual Compacto -->
-          <div class="trade-form-grid" style="margin-top:0.45rem;">
+          <div class="trade-form-grid" style="margin-top:0.4rem;">
             <div class="trade-input-group">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
+              <label>
                 <span>LOTE</span>
-                <span id="btn-calc-lot" style="cursor:pointer; color:var(--accent); font-size:0.63rem; font-weight:700;" title="Calcular lote automático al 0.5% FTMO">⚡ Auto</span>
+                <span id="btn-calc-lot" style="cursor:pointer; color:var(--accent); font-size:0.62rem; font-weight:700;" title="Calcular lote automático al 0.5% FTMO">⚡ Auto</span>
               </label>
               <input type="number" id="trade-lot" class="trade-input" value="0.10" step="0.01" min="0.01" max="50">
               <div id="lot-usd-risk-preview" style="font-size:0.62rem; color:var(--text-dim); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Riesgo: —</div>
             </div>
             <div class="trade-input-group">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>STOP LOSS</span>
-                <span id="sl-unit-badge" style="font-size:0.62rem; color:var(--warn); font-weight:700;">PIPS</span>
+              <label>
+                <span>SL</span>
+                <span id="sl-unit-badge" style="font-size:0.62rem; color:var(--warn); font-weight:700;">pips</span>
               </label>
               <input type="number" id="trade-sl" class="trade-input" placeholder="ej. 20" step="0.5" min="0">
-              <div id="sl-price-preview" style="font-size:0.62rem; color:var(--warn); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">SL: —</div>
+              <div id="sl-price-preview" style="font-size:0.62rem; color:var(--warn); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">—</div>
             </div>
             <div class="trade-input-group">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>TAKE PROFIT</span>
-                <span id="tp-unit-badge" style="font-size:0.62rem; color:var(--bull); font-weight:700;">PIPS</span>
+              <label>
+                <span>TP</span>
+                <span id="tp-unit-badge" style="font-size:0.62rem; color:var(--bull); font-weight:700;">pips</span>
               </label>
               <input type="number" id="trade-tp" class="trade-input" placeholder="ej. 40" step="0.5" min="0">
-              <div id="tp-price-preview" style="font-size:0.62rem; color:var(--bull); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">TP: —</div>
+              <div id="tp-price-preview" style="font-size:0.62rem; color:var(--bull); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">—</div>
             </div>
+          </div>
+
+          <!-- Tira compacta de precios calculados (sin ensanchar columnas) -->
+          <div id="trade-levels-strip" style="display:flex; justify-content:space-between; align-items:center; font-family:var(--font-mono); font-size:0.63rem; color:var(--text-dim); padding:0.2rem 0.4rem; background:rgba(0,0,0,0.25); border-radius:4px; margin-bottom:0.35rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            <span id="strip-buy-info">BUY: SL — · TP —</span>
+            <span id="strip-sell-info">SELL: SL — · TP —</span>
           </div>
 
           <!-- Botones BUY / SELL -->
@@ -5738,27 +5757,31 @@
         }
       }
 
-      // Actualizar SL precio
+      // Actualizar SL y TP previews pequeños debajo de cada caja
       const slPrevEl = $('sl-price-preview');
       if (slPrevEl) {
-        if (!isNaN(slPips) && slPips > 0 && refPrice != null) {
-          const buySl = (refPrice - (slPips * pip)).toFixed(dec);
-          const sellSl = (refPrice + (slPips * pip)).toFixed(dec);
-          slPrevEl.textContent = `B: ${buySl} | S: ${sellSl}`;
-        } else {
-          slPrevEl.textContent = 'SL: —';
-        }
+        slPrevEl.textContent = (!isNaN(slPips) && slPips > 0) ? `-${slPips.toFixed(1)}p` : '—';
       }
 
-      // Actualizar TP precio
       const tpPrevEl = $('tp-price-preview');
       if (tpPrevEl) {
-        if (!isNaN(tpPips) && tpPips > 0 && refPrice != null) {
-          const buyTp = (refPrice + (tpPips * pip)).toFixed(dec);
-          const sellTp = (refPrice - (tpPips * pip)).toFixed(dec);
-          tpPrevEl.textContent = `B: ${buyTp} | S: ${sellTp}`;
+        tpPrevEl.textContent = (!isNaN(tpPips) && tpPips > 0) ? `+${tpPips.toFixed(1)}p` : '—';
+      }
+
+      // Actualizar la tira compacta inferior de precios calculados
+      const buyInfoEl = $('strip-buy-info');
+      const sellInfoEl = $('strip-sell-info');
+      if (buyInfoEl && sellInfoEl) {
+        if (refPrice != null) {
+          const buySl = (!isNaN(slPips) && slPips > 0) ? (refPrice - (slPips * pip)).toFixed(dec) : '—';
+          const buyTp = (!isNaN(tpPips) && tpPips > 0) ? (refPrice + (tpPips * pip)).toFixed(dec) : '—';
+          const sellSl = (!isNaN(slPips) && slPips > 0) ? (refPrice + (slPips * pip)).toFixed(dec) : '—';
+          const sellTp = (!isNaN(tpPips) && tpPips > 0) ? (refPrice - (tpPips * pip)).toFixed(dec) : '—';
+          buyInfoEl.innerHTML = `🟢 BUY: <b style="color:var(--text-main);">${buySl}</b> / <b style="color:var(--text-main);">${buyTp}</b>`;
+          sellInfoEl.innerHTML = `🔴 SELL: <b style="color:var(--text-main);">${sellSl}</b> / <b style="color:var(--text-main);">${sellTp}</b>`;
         } else {
-          tpPrevEl.textContent = 'TP: —';
+          buyInfoEl.textContent = 'BUY: SL — · TP —';
+          sellInfoEl.textContent = 'SELL: SL — · TP —';
         }
       }
     }
