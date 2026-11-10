@@ -688,7 +688,7 @@
     /* Main Grid Workspace */
     .workspace-grid {
       display: grid;
-      grid-template-columns: 260px 1fr 340px;
+      grid-template-columns: 240px 1fr 350px;
       flex: 1;
       min-height: 0;
       background: var(--bg);
@@ -696,7 +696,7 @@
     }
 
     .workspace-grid.sidebar-collapsed {
-      grid-template-columns: 0px 1fr 340px;
+      grid-template-columns: 0px 1fr 350px;
     }
 
     .workspace-grid.sidebar-collapsed .left-sidebar {
@@ -1430,22 +1430,33 @@
 
     .setup-params-table {
       width: 100%;
-      font-size: 0.74rem;
+      font-size: 0.72rem;
       font-family: var(--font-mono);
       margin-top: 0.45rem;
       border-collapse: collapse;
+      table-layout: fixed;
     }
 
     .setup-params-table td {
-      padding: 0.18rem 0;
+      padding: 0.2rem 0;
       color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
+    .setup-params-table td:first-child {
+      width: 44%;
+      text-align: left;
+    }
+
     .setup-params-table td:last-child {
+      width: 56%;
       text-align: right;
       color: var(--text-main);
       font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
@@ -1459,6 +1470,8 @@
       display: flex;
       flex-direction: column;
       gap: 0.35rem;
+      min-width: 0;
+      overflow: hidden;
     }
 
     .htf-matrix-header {
@@ -1476,12 +1489,13 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 0.35rem;
+      min-width: 0;
     }
 
     .htf-chip {
-      padding: 0.28rem 0.45rem;
+      padding: 0.25rem 0.38rem;
       border-radius: 5px;
-      font-size: 0.69rem;
+      font-size: 0.67rem;
       font-family: var(--font-mono);
       font-weight: 600;
       border: 1px solid var(--border);
@@ -1489,10 +1503,22 @@
       color: var(--text-muted);
       display: flex;
       align-items: center;
-      gap: 0.28rem;
+      gap: 0.25rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      min-width: 0;
+    }
+
+    .htf-chip .tf-tag {
+      flex-shrink: 0;
+    }
+
+    .htf-chip span:last-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
     }
 
     .htf-chip.bull {
@@ -2225,7 +2251,7 @@
 
             <table class="setup-params-table">
               <tr>
-                <td>Entrada sugerida</td>
+                <td>Entrada</td>
                 <td id="param-entry">—</td>
               </tr>
               <tr>
@@ -2237,7 +2263,7 @@
                 <td id="param-tp" style="color:var(--bull);">—</td>
               </tr>
               <tr>
-                <td>Riesgo/Beneficio (R:R)</td>
+                <td>Riesgo / R:R</td>
                 <td id="param-rr">1 : 2.0</td>
               </tr>
             </table>
@@ -2271,10 +2297,16 @@
             </div>
           </div>
 
-          <!-- Tira compacta de precios calculados (sin ensanchar columnas) -->
-          <div id="trade-levels-strip" style="display:flex; justify-content:space-between; align-items:center; font-family:var(--font-mono); font-size:0.63rem; color:var(--text-dim); padding:0.2rem 0.4rem; background:rgba(0,0,0,0.25); border-radius:4px; margin-bottom:0.35rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-            <span id="strip-buy-info">BUY: SL — · TP —</span>
-            <span id="strip-sell-info">SELL: SL — · TP —</span>
+          <!-- Tira compacta de precios calculados a 2 líneas para que NUNCA desborde -->
+          <div id="trade-levels-strip" style="display:flex; flex-direction:column; gap:0.2rem; font-family:var(--font-mono); font-size:0.65rem; padding:0.25rem 0.45rem; background:rgba(0,0,0,0.28); border:1px solid rgba(255,255,255,0.06); border-radius:5px; margin-bottom:0.4rem; min-width:0;">
+            <div id="strip-buy-info" style="display:flex; justify-content:space-between; align-items:center; min-width:0;">
+              <span style="color:var(--bull); font-weight:700;">🟢 SI COMPRAS (BUY):</span>
+              <span style="color:var(--text-main); font-weight:600;">SL — · TP —</span>
+            </div>
+            <div id="strip-sell-info" style="display:flex; justify-content:space-between; align-items:center; min-width:0;">
+              <span style="color:var(--bear); font-weight:700;">🔴 SI VENDES (SELL):</span>
+              <span style="color:var(--text-main); font-weight:600;">SL — · TP —</span>
+            </div>
           </div>
 
           <!-- Botones BUY / SELL -->
@@ -5085,16 +5117,23 @@
         const isBear = bias === 'BAJISTA' || bias === 'BEARISH';
         const cls = isBull ? 'bull' : (isBear ? 'bear' : 'neutral');
         const arrow = isBull ? '▲' : (isBear ? '▼' : '•');
-        const mainLbl = tf.state_label || tf.bias_label || bias;
+        const rawLbl = tf.state_label || tf.bias_label || bias;
+        const mainLbl = String(rawLbl)
+          .replace(/Retroceso a Premium/gi, 'Ret. Premium')
+          .replace(/Retroceso a Discount/gi, 'Ret. Discount')
+          .replace(/Retroceso a/gi, 'Ret.')
+          .replace(/Retroceso/gi, 'Ret.')
+          .replace(/Equilibrium/gi, 'Eq.');
+
         let extra = '';
         if (tf.active_poi) {
           const poiTxt = typeof tf.active_poi === 'string' ? tf.active_poi : (tf.active_poi.short_label || '');
           if (poiTxt) extra = ` · ${poiTxt}`;
         } else if (tf.zone === 'PREMIUM' || tf.zone === 'DISCOUNT') {
-          const zTxt = tf.zone_label || `${tf.zone === 'PREMIUM' ? 'Premium' : 'Discount'} ${Math.round(tf.range_pct || 50)}%`;
+          const zTxt = `${tf.zone === 'PREMIUM' ? 'Prem' : 'Disc'} ${Math.round(tf.range_pct || 50)}%`;
           extra = ` · ${zTxt}`;
         }
-        return `<div class="htf-chip ${cls}" title="${tfKey}: ${mainLbl}${extra}"><span class="tf-tag">${tfKey}:</span><span>${arrow} ${mainLbl}${extra}</span></div>`;
+        return `<div class="htf-chip ${cls}" title="${tfKey}: ${rawLbl}${extra}"><span class="tf-tag">${tfKey}:</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${arrow} ${mainLbl}${extra}</span></div>`;
       }).join('');
 
       const bonus = Number(src.score_bonus || 0);
@@ -5215,8 +5254,8 @@
 
       // Parámetros calculados (formateados según decimales del símbolo)
       const entryPriceFormatted = data.entry != null ? formatPrice(data.entry, reqSymbol) : (data.current_price != null ? formatPrice(data.current_price, reqSymbol) : '—');
-      const oteTag = data.in_ote ? ' · 🎯 OTE' : '';
-      const entryTypeTag = isLimit ? ` <span style="font-size:0.67rem; color:var(--accent, #38bdf8); font-weight:600;">(Límite${oteTag})</span>` : (data.in_ote ? ` <span style="font-size:0.67rem; color:#a855f7; font-weight:600;">(🎯 OTE)</span>` : '');
+      const oteTag = data.in_ote ? ' · OTE' : '';
+      const entryTypeTag = isLimit ? ` <span style="font-size:0.64rem; color:var(--accent, #38bdf8); font-weight:600;">(Limit${oteTag})</span>` : (data.in_ote ? ` <span style="font-size:0.64rem; color:#a855f7; font-weight:600;">(OTE)</span>` : '');
       $('param-entry').innerHTML = `${entryPriceFormatted}${entryTypeTag}`;
       $('param-sl').textContent = data.sl != null ? formatPrice(data.sl, reqSymbol) : '—';
       $('param-tp').textContent = data.tp != null ? formatPrice(data.tp, reqSymbol) : '—';
@@ -5777,11 +5816,11 @@
           const buyTp = (!isNaN(tpPips) && tpPips > 0) ? (refPrice + (tpPips * pip)).toFixed(dec) : '—';
           const sellSl = (!isNaN(slPips) && slPips > 0) ? (refPrice + (slPips * pip)).toFixed(dec) : '—';
           const sellTp = (!isNaN(tpPips) && tpPips > 0) ? (refPrice - (tpPips * pip)).toFixed(dec) : '—';
-          buyInfoEl.innerHTML = `🟢 BUY: <b style="color:var(--text-main);">${buySl}</b> / <b style="color:var(--text-main);">${buyTp}</b>`;
-          sellInfoEl.innerHTML = `🔴 SELL: <b style="color:var(--text-main);">${sellSl}</b> / <b style="color:var(--text-main);">${sellTp}</b>`;
+          buyInfoEl.innerHTML = `<span style="color:var(--bull); font-weight:700;">🟢 SI COMPRAS (BUY):</span><span style="color:var(--text-main);">SL <b>${buySl}</b> · TP <b>${buyTp}</b></span>`;
+          sellInfoEl.innerHTML = `<span style="color:var(--bear); font-weight:700;">🔴 SI VENDES (SELL):</span><span style="color:var(--text-main);">SL <b>${sellSl}</b> · TP <b>${sellTp}</b></span>`;
         } else {
-          buyInfoEl.textContent = 'BUY: SL — · TP —';
-          sellInfoEl.textContent = 'SELL: SL — · TP —';
+          buyInfoEl.innerHTML = `<span style="color:var(--bull); font-weight:700;">🟢 SI COMPRAS (BUY):</span><span style="color:var(--text-dim);">SL — · TP —</span>`;
+          sellInfoEl.innerHTML = `<span style="color:var(--bear); font-weight:700;">🔴 SI VENDES (SELL):</span><span style="color:var(--text-dim);">SL — · TP —</span>`;
         }
       }
     }
