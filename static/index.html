@@ -2238,14 +2238,23 @@
                 <span id="btn-calc-lot" style="cursor:pointer; color:var(--accent); font-size:0.63rem; font-weight:700;" title="Calcular lote automático al 0.5% FTMO">⚡ Auto</span>
               </label>
               <input type="number" id="trade-lot" class="trade-input" value="0.10" step="0.01" min="0.01" max="50">
+              <div id="lot-usd-risk-preview" style="font-size:0.62rem; color:var(--text-dim); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Riesgo: —</div>
             </div>
             <div class="trade-input-group">
-              <label>STOP LOSS</label>
-              <input type="number" id="trade-sl" class="trade-input" placeholder="ej. 1.1220" step="any">
+              <label style="display:flex; justify-content:space-between; align-items:center;">
+                <span>STOP LOSS</span>
+                <span id="sl-unit-badge" style="font-size:0.62rem; color:var(--warn); font-weight:700;">PIPS</span>
+              </label>
+              <input type="number" id="trade-sl" class="trade-input" placeholder="ej. 20" step="0.5" min="0">
+              <div id="sl-price-preview" style="font-size:0.62rem; color:var(--warn); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">SL: —</div>
             </div>
             <div class="trade-input-group">
-              <label>TAKE PROFIT</label>
-              <input type="number" id="trade-tp" class="trade-input" placeholder="ej. 1.1070" step="any">
+              <label style="display:flex; justify-content:space-between; align-items:center;">
+                <span>TAKE PROFIT</span>
+                <span id="tp-unit-badge" style="font-size:0.62rem; color:var(--bull); font-weight:700;">PIPS</span>
+              </label>
+              <input type="number" id="trade-tp" class="trade-input" placeholder="ej. 40" step="0.5" min="0">
+              <div id="tp-price-preview" style="font-size:0.62rem; color:var(--bull); margin-top:0.2rem; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">TP: —</div>
             </div>
           </div>
 
@@ -3009,6 +3018,13 @@
       if (sym && (sym.endsWith('JPY') || sym.includes('JPY'))) return 0.001;
       if (sym === 'BTCUSD') return 0.01;
       return 0.00001;
+    }
+
+    function getPipSize(sym = state.symbol) {
+      if (sym === 'XAUUSD') return 0.10;
+      if (sym && (sym.endsWith('JPY') || sym.includes('JPY'))) return 0.01;
+      if (sym === 'BTCUSD') return 1.0;
+      return 0.0001;
     }
 
     function formatPrice(p, sym = state.symbol) {
@@ -4647,8 +4663,30 @@
         const entry = s.entry != null ? Number(s.entry) : null;
         const inputSl = parseFloat($('trade-sl') ? $('trade-sl').value : '');
         const inputTp = parseFloat($('trade-tp') ? $('trade-tp').value : '');
-        const sl = (!isNaN(inputSl) && inputSl > 0) ? inputSl : (s.sl != null ? Number(s.sl) : null);
-        const tp = (!isNaN(inputTp) && inputTp > 0) ? inputTp : (s.tp != null ? Number(s.tp) : null);
+        const pip = getPipSize(sym);
+        const basePrice = entry != null ? entry : _precioReferencia();
+        let sl = null;
+        let tp = null;
+
+        if (!isNaN(inputSl) && inputSl > 0 && basePrice != null) {
+          if (inputSl < 500 && sym !== 'BTCUSD') {
+            sl = dir === 'BUY' ? basePrice - (inputSl * pip) : basePrice + (inputSl * pip);
+          } else {
+            sl = inputSl;
+          }
+        } else if (s.sl != null) {
+          sl = Number(s.sl);
+        }
+
+        if (!isNaN(inputTp) && inputTp > 0 && basePrice != null) {
+          if (inputTp < 2000 && sym !== 'BTCUSD') {
+            tp = dir === 'BUY' ? basePrice + (inputTp * pip) : basePrice - (inputTp * pip);
+          } else {
+            tp = inputTp;
+          }
+        } else if (s.tp != null) {
+          tp = Number(s.tp);
+        }
 
         // Caja de la Zona SMC elegida (techo y piso)
         const ez = s.entry_zone;
@@ -4880,6 +4918,7 @@
         $('btn-buy-price').textContent = askFmt;
         $('btn-sell-price').textContent = bidFmt;
         $('cur-spread-label').textContent = `bid ${bidFmt} · ask ${askFmt} · spread ${data.spread_points != null ? data.spread_points : '—'} pts`;
+        if (typeof updateTradePreviews === 'function') updateTradePreviews();
         return true;
       }
       return false;
@@ -5175,13 +5214,18 @@
       // para no pisar lo que el usuario haya editado a mano.
       const setupKey = `${reqSymbol}|${reqTimeframe}`;
       const cambioSetup = setupKey !== state.setupKey;
-      if (data.sl != null && (cambioSetup || !$('trade-sl').value)) {
-        $('trade-sl').value = formatPrice(data.sl, reqSymbol);
+      const pip = getPipSize(reqSymbol);
+      const entryRef = data.entry != null ? Number(data.entry) : (data.current_price != null ? Number(data.current_price) : null);
+      if (data.sl != null && entryRef != null && (cambioSetup || !$('trade-sl').value)) {
+        const slPips = Math.abs(entryRef - Number(data.sl)) / pip;
+        $('trade-sl').value = (Math.round(slPips * 10) / 10).toFixed(1);
       }
-      if (data.tp != null && (cambioSetup || !$('trade-tp').value)) {
-        $('trade-tp').value = formatPrice(data.tp, reqSymbol);
+      if (data.tp != null && entryRef != null && (cambioSetup || !$('trade-tp').value)) {
+        const tpPips = Math.abs(entryRef - Number(data.tp)) / pip;
+        $('trade-tp').value = (Math.round(tpPips * 10) / 10).toFixed(1);
       }
       state.setupKey = setupKey;
+      if (typeof updateTradePreviews === 'function') updateTradePreviews();
 
       // Killzone pill
       const kzPill = $('killzone-pill');
@@ -5658,7 +5702,68 @@
       $('b-utc').textContent = `UTC ${h}:${m}:${s}`;
     }
 
-    // Calculadora automática de lotaje
+    // Actualizar previsualización en vivo de riesgo USD y precios para SL/TP
+    function updateTradePreviews() {
+      const sym = state.symbol || 'EURUSD';
+      const pip = getPipSize(sym);
+      const dec = getSymbolDecimals(sym);
+      const refPrice = _precioReferencia() || (state.activeSetup && state.activeSetup.entry ? Number(state.activeSetup.entry) : null);
+
+      const slPips = parseFloat($('trade-sl') ? $('trade-sl').value : '');
+      const tpPips = parseFloat($('trade-tp') ? $('trade-tp').value : '');
+      const lot = parseFloat($('trade-lot') ? $('trade-lot').value : '') || 0.10;
+
+      // Calcular valor de pip por lote estándar
+      let pipValPerLot = 10;
+      if (sym === 'XAUUSD') pipValPerLot = 10;
+      else if (sym.endsWith('JPY')) pipValPerLot = 6.67;
+      else if (sym.startsWith('USD') && refPrice) pipValPerLot = 10 / refPrice;
+      else if (sym.endsWith('USD')) pipValPerLot = 10;
+      else pipValPerLot = 7.5;
+
+      const pipValTotal = pipValPerLot * lot;
+
+      // Actualizar LOTE riesgo
+      const lotRiskEl = $('lot-usd-risk-preview');
+      if (lotRiskEl) {
+        if (!isNaN(slPips) && slPips > 0) {
+          const riskUsd = slPips * pipValTotal;
+          const accountEquity = (state.prop && state.prop.status && state.prop.status.equity) ? state.prop.status.equity : 25000;
+          const riskPct = ((riskUsd / accountEquity) * 100).toFixed(2);
+          lotRiskEl.innerHTML = `Riesgo: <b>~$${riskUsd.toFixed(0)}</b> (${riskPct}%)`;
+          lotRiskEl.style.color = riskPct > 1.0 ? 'var(--warn)' : 'var(--text-dim)';
+        } else {
+          lotRiskEl.textContent = `~$${(pipValTotal * 20).toFixed(0)} en 20p`;
+          lotRiskEl.style.color = 'var(--text-dim)';
+        }
+      }
+
+      // Actualizar SL precio
+      const slPrevEl = $('sl-price-preview');
+      if (slPrevEl) {
+        if (!isNaN(slPips) && slPips > 0 && refPrice != null) {
+          const buySl = (refPrice - (slPips * pip)).toFixed(dec);
+          const sellSl = (refPrice + (slPips * pip)).toFixed(dec);
+          slPrevEl.textContent = `B: ${buySl} | S: ${sellSl}`;
+        } else {
+          slPrevEl.textContent = 'SL: —';
+        }
+      }
+
+      // Actualizar TP precio
+      const tpPrevEl = $('tp-price-preview');
+      if (tpPrevEl) {
+        if (!isNaN(tpPips) && tpPips > 0 && refPrice != null) {
+          const buyTp = (refPrice + (tpPips * pip)).toFixed(dec);
+          const sellTp = (refPrice - (tpPips * pip)).toFixed(dec);
+          tpPrevEl.textContent = `B: ${buyTp} | S: ${sellTp}`;
+        } else {
+          tpPrevEl.textContent = 'TP: —';
+        }
+      }
+    }
+
+    // Calculadora automática de lotaje basada en pips de Stop Loss
     function autoCalculateLot() {
       if (!state.prop || !state.prop.profile) {
         alert('Cargando información del challenge FTMO...');
@@ -5669,58 +5774,25 @@
       const slInput = parseFloat($('trade-sl').value);
       const sym = state.symbol || 'EURUSD';
 
-      if (!slInput || isNaN(slInput)) {
-        // Distancia por defecto = la de config (sl_distance_by_symbol).
-        const slDist = (state.slBySymbol && state.slBySymbol[sym])
-          || (sym === 'XAUUSD' ? 20.0 : 0.0050);
-        let pipVal = 10;
-        let contract = 100000;
-        if (sym === 'XAUUSD') {
-          pipVal = 100;
-          contract = 100;
-        } else if (sym.startsWith('USD')) {
-          contract = 100000;
-          pipVal = sym.endsWith('JPY') ? (1000 / currentPrice) : (10 / currentPrice);
-        } else if (sym.endsWith('JPY')) {
-          pipVal = 6.67;
-        }
-        const rawCalc = riskUsd / (slDist * contract * (pipVal / 10));
-        const maxCap = sym === 'XAUUSD' ? 0.05 : 10;
-        const calcLot = Math.max(0.01, Math.min(maxCap, rawCalc)).toFixed(2);
-        $('trade-lot').value = calcLot;
-        alert(`Lote calculado: ${calcLot} para arriesgar máx ${fmtUsd(riskUsd)} con SL sugerido a ${slDist} del precio.\n(O puedes dejar el lote vacío para que el servidor lo calcule exactamente por bróker).`);
-        return;
+      let slPips = slInput;
+      if (!slPips || isNaN(slPips) || slPips <= 0) {
+        const slDist = (state.slBySymbol && state.slBySymbol[sym]) || (sym === 'XAUUSD' ? 2.0 : 0.0025);
+        slPips = slDist / getPipSize(sym);
       }
 
-      const diff = Math.abs(currentPrice - slInput);
-      if (diff <= 0) {
-        alert('El Stop Loss debe ser diferente al precio actual.');
-        return;
-      }
+      let pipValPerLot = 10;
+      if (sym === 'XAUUSD') pipValPerLot = 10;
+      else if (sym.endsWith('JPY')) pipValPerLot = 6.67;
+      else if (sym.startsWith('USD') && currentPrice) pipValPerLot = 10 / currentPrice;
+      else if (sym.endsWith('USD')) pipValPerLot = 10;
+      else pipValPerLot = 7.5;
 
-      // Cálculo por símbolo
-      let lot = 0.1;
-      if (sym === 'XAUUSD') {
-        lot = (riskUsd / (diff * 100)).toFixed(2);
-      } else if (sym.endsWith('USD')) {
-        const slPips = diff * 10000;
-        lot = (riskUsd / (slPips * 10)).toFixed(2);
-      } else if (sym.startsWith('USD')) {
-        const pipFactor = sym.endsWith('JPY') ? (1000 / currentPrice) : (10 / currentPrice);
-        const pips = sym.endsWith('JPY') ? (diff * 100) : (diff * 10000);
-        lot = (riskUsd / (pips * pipFactor)).toFixed(2);
-      } else if (sym.endsWith('JPY')) {
-        const pips = diff * 100;
-        lot = (riskUsd / (pips * 6.67)).toFixed(2);
-      } else {
-        const pips = diff * 10000;
-        lot = (riskUsd / (pips * 7.5)).toFixed(2);
-      }
-
-      const maxLotCap = sym === 'XAUUSD' ? 0.05 : 20;
-      lot = Math.max(0.01, Math.min(maxLotCap, Number(lot))).toFixed(2);
-      $('trade-lot').value = lot;
-      alert(`Lote dimensionado automáticamente a ${lot} lotes para un riesgo de ${fmtUsd(riskUsd)}.\n(Nota: si dejas el campo vacío, el backend dimensionará exactamente por bróker).`);
+      const rawCalc = riskUsd / (slPips * pipValPerLot);
+      const maxCap = sym === 'XAUUSD' ? 0.05 : 20;
+      const calcLot = Math.max(0.01, Math.min(maxCap, rawCalc)).toFixed(2);
+      $('trade-lot').value = calcLot;
+      updateTradePreviews();
+      alert(`Lote calculado: ${calcLot} lotes para un riesgo de ${fmtUsd(riskUsd)} con SL de ${slPips.toFixed(1)} pips.\n(Riesgo diario protegido al 0.5% FTMO).`);
     }
 
     // Limpia SL/TP (y opcionalmente el lote) al cambiar de contexto, para no
@@ -5730,6 +5802,7 @@
       $('trade-sl').value = '';
       $('trade-tp').value = '';
       state.setupKey = null;
+      updateTradePreviews();
     }
 
     function _precioReferencia() {
@@ -5782,10 +5855,32 @@
       const symbol = state.symbol;
       const rawLot = $('trade-lot').value ? parseFloat($('trade-lot').value) : null;
       const lot = (rawLot && rawLot > 0) ? rawLot : null;
-      const sl = $('trade-sl').value ? parseFloat($('trade-sl').value) : null;
-      const tp = $('trade-tp').value ? parseFloat($('trade-tp').value) : null;
+      const slPips = $('trade-sl').value ? parseFloat($('trade-sl').value) : null;
+      const tpPips = $('trade-tp').value ? parseFloat($('trade-tp').value) : null;
       const price = action === 'BUY' ? $('btn-buy-price').textContent : $('btn-sell-price').textContent;
-      const ref = _precioReferencia();
+      const isBuy = action === 'BUY';
+      const pip = getPipSize(symbol);
+      const dec = getSymbolDecimals(symbol);
+      const ref = _precioReferencia() || parseFloat(price);
+
+      let sl = null;
+      let tp = null;
+
+      if (slPips != null && !isNaN(slPips) && slPips > 0 && ref != null) {
+        // En pips: BUY resta pips del precio, SELL suma pips
+        const rawSl = isBuy ? ref - (slPips * pip) : ref + (slPips * pip);
+        sl = Number(rawSl.toFixed(dec));
+      } else if (slPips != null && slPips > 500 && symbol !== 'BTCUSD') {
+        sl = slPips;
+      }
+
+      if (tpPips != null && !isNaN(tpPips) && tpPips > 0 && ref != null) {
+        // En pips: BUY suma pips al precio, SELL resta pips
+        const rawTp = isBuy ? ref + (tpPips * pip) : ref - (tpPips * pip);
+        tp = Number(rawTp.toFixed(dec));
+      } else if (tpPips != null && tpPips > 500 && symbol !== 'BTCUSD') {
+        tp = tpPips;
+      }
 
       if (!_validaNivel('Stop Loss', sl, ref, action, true)) return;
       if (!_validaNivel('Take Profit', tp, ref, action, false)) return;
@@ -5794,7 +5889,9 @@
       // usuario cambia de símbolo, la orden sigue usando el mismo nivel y contexto.
       const active = (state.activeSetup && state.activeSetup.symbol === symbol) ? state.activeSetup : null;
       state.pendingTrade = {
-        symbol, action, volume: lot, sl, tp, price,
+        symbol, action, volume: lot, sl, tp, 
+        sl_pips: slPips, tp_pips: tpPips,
+        price,
         sl_distance: sl != null && ref != null ? Math.abs(ref - sl) : null,
         tp_distance: tp != null && ref != null ? Math.abs(ref - tp) : null,
         score: active ? active.score : null,
@@ -5869,8 +5966,8 @@
           <div>Tipo de Orden: <b style="color:var(--${action === 'BUY' ? 'bull' : 'bear'})">${orderTypeLabel} ${isLimitOrder ? '<span style="color:var(--accent, #38bdf8); font-size:0.75rem;">(Pullback Limit OB/OTE)</span>' : '(A Mercado)'}</b></div>
           <div>Volumen: <b>${lot ? lot + ' Lotes' : 'Auto (dimensionado por riesgo FTMO)'}</b></div>
           <div>Precio Entrada: <b>${isLimitOrder && active && active.entry != null ? formatPrice(active.entry, symbol) : price}</b></div>
-          <div>Stop Loss: <b>${sl != null ? sl : 'Sin SL'}</b></div>
-          <div>Take Profit: <b>${tp != null ? tp : 'Sin TP'}</b></div>
+          <div>Stop Loss: <b>${sl != null ? (slPips ? slPips + ' Pips (' + sl + ')' : sl) : 'Sin SL'}</b></div>
+          <div>Take Profit: <b>${tp != null ? (tpPips ? tpPips + ' Pips (' + tp + ')' : tp) : 'Sin TP'}</b></div>
         </div>
         ${macroHtml}
         ${icHtml}
@@ -6087,12 +6184,21 @@
       // Auto-lote
       if ($('btn-calc-lot')) $('btn-calc-lot').onclick = () => autoCalculateLot();
 
-      // Sincronización en vivo de inputs SL y TP con las líneas del gráfico
+      // Sincronización en vivo de inputs Lote, SL y TP con riesgo y líneas del gráfico
+      if ($('trade-lot')) {
+        $('trade-lot').addEventListener('input', () => updateTradePreviews());
+      }
       if ($('trade-sl')) {
-        $('trade-sl').addEventListener('input', () => renderChartOverlays());
+        $('trade-sl').addEventListener('input', () => {
+          renderChartOverlays();
+          updateTradePreviews();
+        });
       }
       if ($('trade-tp')) {
-        $('trade-tp').addEventListener('input', () => renderChartOverlays());
+        $('trade-tp').addEventListener('input', () => {
+          renderChartOverlays();
+          updateTradePreviews();
+        });
       }
 
       // Botones de Orden
